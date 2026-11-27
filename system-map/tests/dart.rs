@@ -1,51 +1,16 @@
 //! `dart-imports`: Dart repositories in temporary folders, read through `check` and `imports` (spec #621, "Testing
 //! Decisions").
 
-use std::{path::Path, process::Command};
-
 use serde_json::{Value, json};
 
-use crate::common::{has, project_text, write};
+use crate::common::{
+    assert_only_candidate_links_relaxed, assert_unsure_file_listed_and_link_unproven,
+    extractor_map, has, imports_json, pairs, repo, report, run, sites, write,
+};
 
 /// A map naming `dart-imports` whose parts are `parts`, each an id with its paths, and whose import links are `links`.
 fn map(parts: &[(&str, &[&str])], links: &[(&str, &str)]) -> Value {
-    json!({
-        "version": 2,
-        "extractors": ["dart-imports"],
-        "parts": parts.iter().map(|(id, paths)| json!({
-            "id": id, "name": id, "caption": id, "purpose": "A part.", "holds": [], "tier": "core", "paths": paths
-        })).collect::<Vec<_>>(),
-        "actors": [],
-        "links": links.iter().map(|(from, to)| json!({
-            "id": format!("{from}-{to}"), "from": from, "to": to, "kind": "import"
-        })).collect::<Vec<_>>(),
-        "ignored": ["system-map.json", "pubspec.yaml"],
-        "laws": []
-    })
-}
-
-/// A repository holding `map` and `files` with their texts, committed.
-fn repo(map: &Value, files: &[(&str, &str)]) -> (tempfile::TempDir, String) {
-    let (dir, root) = project_text(&map.to_string(), &[]);
-    for (file, text) in files {
-        write(dir.path(), file, text);
-    }
-    studio_test_support::git(dir.path(), &["add", "-A"]);
-    studio_test_support::git(dir.path(), &["commit", "-q", "-m", "Code"]);
-    (dir, root)
-}
-
-fn report(root: &str) -> system_map::Report {
-    system_map::check(Path::new(root))
-}
-
-/// Every file pair of the computed edges, as `from>to`.
-fn pairs(report: &system_map::Report) -> Vec<String> {
-    report
-        .edges
-        .iter()
-        .flat_map(|e| e.pairs.iter().map(|p| format!("{}>{}", p.from, p.to)))
-        .collect()
+    extractor_map("dart-imports", parts, links, &["pubspec.yaml"])
 }
 
 /// The report of a repository of `files`, each Dart file a part of its own and the rest one more, with no link, so that
@@ -86,20 +51,6 @@ fn dart_pairs(files: &[(&str, &str)]) -> Vec<String> {
     let mut found = pairs(&dart_report(files));
     found.sort();
     found
-}
-
-fn run(root: &str, command: &str, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_system-map"))
-        .arg(command)
-        .args(args)
-        .args(["--root", root])
-        .output()
-        .unwrap()
-}
-
-fn imports_json(root: &str) -> Value {
-    let out = run(root, "imports", &["--json"]);
-    serde_json::from_slice(&out.stdout).unwrap()
 }
 
 const PUBSPEC: (&str, &str) = ("pubspec.yaml", "name: app\n");
@@ -585,19 +536,12 @@ fn declared_twice(links: &[(&str, &str)], ignored: &[&str]) -> (tempfile::TempDi
 fn a_name_two_packages_declare_makes_the_importer_unsure_and_relaxes_only_the_link_to_the_candidates()
  {
     let (_dir, root) = declared_twice(&[("app", "xa"), ("app", "xb"), ("app", "xc")], &[]);
-    let out = run(&root, "check", &[]);
-    assert_eq!(
-        String::from_utf8_lossy(&out.stderr),
-        "note: app/lib/main.dart is unsure of package:x; its links to xa, xb pass as unproven\n"
-    );
     // The link to the part that holds no candidate still fails.
-    let problems = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(problems.lines().count(), 1, "{problems}");
-    assert!(
-        problems.starts_with(
-            "import link \"app-xc\" runs from \"app\" to \"xc\", but the code shows no dependency"
-        ),
-        "{problems}"
+    assert_only_candidate_links_relaxed(
+        &root,
+        "note: app/lib/main.dart is unsure of package:x; its links to xa, xb pass as unproven\n",
+        "app",
+        "xc",
     );
     let out = run(&root, "check", &["--json"]);
     let value: Value = serde_json::from_slice(&out.stdout).unwrap();
@@ -650,20 +594,7 @@ fn sorted(mut found: Vec<String>) -> Vec<String> {
 #[test]
 fn imports_json_lists_the_unsure_files_and_the_pass_line_counts_the_relaxed_link_unproven() {
     let (_dir, root) = declared_twice(&[("app", "xa")], &[]);
-    let value = imports_json(&root);
-    assert_eq!(value["unsure"][0]["file"], "app/lib/main.dart");
-    assert_eq!(value["unsure"][0]["reason"], "declared twice");
-    let out = run(&root, "check", &[]);
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stdout)
-    );
-    assert!(
-        String::from_utf8_lossy(&out.stdout).contains("1 import (0 proven, 1 unproven)"),
-        "{}",
-        String::from_utf8_lossy(&out.stdout)
-    );
+    assert_unsure_file_listed_and_link_unproven(&root, "app/lib/main.dart");
 }
 
 #[test]
@@ -880,28 +811,6 @@ fn reading_stops_at_the_first_declaration_and_goes_on_past_unquoted_imports() {
     );
 }
 
-/// Each file pair's import sites in `check --json`, as `from>to file:line`.
-fn sites(root: &str) -> Vec<String> {
-    let out = run(root, "check", &["--json"]);
-    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
-    let mut found = Vec::new();
-    for edge in value["edges"].as_array().into_iter().flatten() {
-        for pair in edge["pairs"].as_array().unwrap() {
-            for site in pair["sites"].as_array().unwrap() {
-                found.push(format!(
-                    "{}>{} {}:{}",
-                    pair["from"].as_str().unwrap(),
-                    pair["to"].as_str().unwrap(),
-                    site["file"].as_str().unwrap(),
-                    site["line"]
-                ));
-            }
-        }
-    }
-    found.sort();
-    found
-}
-
 #[test]
 fn each_pair_keeps_the_line_of_its_directives_keyword_as_an_import_site() {
     let (_dir, root) = repo(
@@ -924,7 +833,7 @@ fn each_pair_keeps_the_line_of_its_directives_keyword_as_an_import_site() {
         ],
     );
     assert_eq!(
-        sites(&root),
+        sites(&root, &[]),
         [
             "x.dart>y.dart x.dart:4",
             "x.dart>y.dart x.dart:7",
@@ -946,7 +855,7 @@ fn a_lone_carriage_return_ends_a_line_and_a_crlf_ends_one() {
             ("y.dart", ""),
         ],
     );
-    assert_eq!(sites(&root), ["x.dart>y.dart x.dart:4"]);
+    assert_eq!(sites(&root, &[]), ["x.dart>y.dart x.dart:4"]);
 }
 
 /// A repository whose part `s` holds `s/bad.dart`, with `header` as its text, and `extra`; part `lib` holds `lib/y.dart`,

@@ -1,6 +1,6 @@
 // The event contract (spec #548, Group 3): every event the page listens for is one the server emits, and every event the
 // server emits is one the page listens for. Every server `emit` takes its name as a string literal (`server/src/lib.rs`,
-// `Events::emit`), so the names are read from the source; a `#[cfg(test)]` module's emits are the tests' own.
+// `Events::emit`), so the names are read from the source; a `#[cfg(test)]` module's emits, inline or in its `tests.rs`, are the tests' own.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -66,6 +66,6 @@ test("a test module's emits are left out", () => {
 
 test("the page and the server agree on every event", () => {
   const page = filesIn("../", ".ts").filter(({ file }) => !file.includes("/tests/"));
-  const server = filesIn("../../server/src/", ".rs");
+  const server = filesIn("../../server/src/", ".rs").filter(({ file }) => !file.endsWith("/tests.rs"));
   assert.deepEqual(mismatches({ page, server }), []);
 });

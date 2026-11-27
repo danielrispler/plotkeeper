@@ -376,27 +376,12 @@ fn literal_tail(piece: &str) -> String {
     let after = piece
         .rfind([')', '*', '?'])
         .map_or(piece, |at| &piece[at + 1..]);
-    collapse(&slashed(after)).0
+    crate::extract::folders::collapse("", &slashed(after)).0
 }
 
 /// `piece` with its `%XX` escapes decoded and every `\` read as `/`.
 fn slashed(piece: &str) -> String {
     unescape(piece).replace('\\', "/")
-}
-
-/// The `/` path `path` collapsed: empty and `.` segments dropped and `x/..` folded, and whether a `..` climbed above
-/// its start, which drops it.
-fn collapse(path: &str) -> (String, bool) {
-    let mut parts: Vec<&str> = Vec::new();
-    let mut climbed = false;
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => climbed |= parts.pop().is_none(),
-            part => parts.push(part),
-        }
-    }
-    (parts.join("/"), climbed)
 }
 
 /// `%XX` escapes decoded, as MSBuild does after it has split the value; one that is not two hex digits stays as written.
@@ -437,6 +422,5 @@ fn resolve(folder: &str, piece: &str) -> Option<String> {
     if is_absolute(&path) {
         return None;
     }
-    let (path, climbed) = collapse(&format!("{folder}{path}"));
-    (!climbed).then_some(path)
+    crate::extract::folders::join(folder, &path)
 }

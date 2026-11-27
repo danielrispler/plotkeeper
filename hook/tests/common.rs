@@ -30,14 +30,12 @@ pub(crate) fn scratch(label: &str) -> PathBuf {
     home
 }
 
-/// `plotkeeper-hook` with `home` as its `HOME`, no `XDG_DATA_HOME` (so on Linux its data folder is under `home` too) and
-/// outside a studio terminal, not yet started.
+/// `plotkeeper-hook` with `home` as its `HOME` and no `XDG_DATA_HOME` (so on Linux its data folder is under `home` too),
+/// not yet started.
 pub(crate) fn hook(home: &Path) -> Command {
     no_xdg();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_plotkeeper-hook"));
-    cmd.env("HOME", home)
-        .env_remove("XDG_DATA_HOME")
-        .env_remove("PLOTKEEPER_TERMINAL_ID");
+    cmd.env("HOME", home).env_remove("XDG_DATA_HOME");
     cmd
 }
 

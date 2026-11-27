@@ -25,9 +25,6 @@ pub struct Session {
     /// events. A saved session without it takes it from its saved `cwd` (`Studio::resume`).
     #[serde(default)]
     pub project: String,
-    /// The studio terminal it runs in, its `PLOTKEEPER_TERMINAL_ID` from its latest event, `None` when
-    /// it runs outside the studio (danielrispler/Falinks#461, decision 8).
-    pub terminal: Option<String>,
     /// Its agent's process, `studio_pid` of its latest event that has one; `None` when its hook
     /// could not tell, and then it never ends by a dead process (#330).
     #[serde(default)]
@@ -57,27 +54,18 @@ pub struct Session {
     /// Claude Code's permission mode, from its latest event that names one (danielrispler/Falinks#541): `default`,
     /// `auto`, `plan` and the like; `None` until one does, as `SessionStart` does not.
     pub permission_mode: Option<String>,
-    /// The permission mode it started in, from its first event that names one, which a resume keeps
-    /// (danielrispler/Falinks#541); `None` until one does.
-    pub started_mode: Option<String>,
     /// When each `/clear` continued it, oldest first: the "cleared" markers in its history.
     pub cleared: Vec<u64>,
-    /// Its latest `SessionEnd` was a `/clear`, so the next `SessionStart` from `clear` on its
-    /// terminal, or in its folder, continues it.
+    /// Its latest `SessionEnd` was a `/clear`, so the next `SessionStart` from `clear` in its folder
+    /// continues it.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub(crate) clearing: bool,
     pub state: State,
-    /// Whether closing its terminal asks first: it is in a turn, or its latest `Stop` listed
-    /// background tasks (danielrispler/Falinks#469).
-    pub asks_before_closing: bool,
     /// Its task has landed; the shell sets it from `Studio::landed` as it sends the list.
     pub landed: bool,
     /// Daniel deleted it: the list leaves it out until it starts again.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub(crate) deleted: bool,
-    /// Its latest `Stop` listed background tasks.
-    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
-    pub(crate) background: bool,
     /// The tool calls whose `PreToolUse` landed and whose `PostToolUse` has not.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
     pub(crate) running: Vec<Call>,
@@ -181,19 +169,6 @@ pub struct Session {
     /// Its work on its ticket: its kind, its phases and how long its agent worked (danielrispler/Falinks#461, decision
     /// 14).
     pub work: Work,
-    /// A row of another agent than Claude Code, from its terminal's OSC 7501 status only (danielrispler/Falinks#560): it
-    /// has no intention, card, brief, estimate or decisions. Its id is its terminal's.
-    pub status_only: bool,
-    /// A status-only row of a plain terminal that New terminal started, while no agent in it reports
-    /// a status or links a session: it has no state of its own. Its id is its terminal's.
-    pub shell: bool,
-    /// Its terminal's OSC 7501 state is `blocked`, for an agent that reports no permission or question of its own
-    /// (agy, decision 5): it needs Daniel, with no text.
-    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
-    pub(crate) terminal_blocked: bool,
-    /// A status-only row's terminal `turn` at the last list (danielrispler/Falinks#560).
-    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
-    pub(crate) reported_turn: u64,
 }
 
 /// What names a session (danielrispler/Falinks#461, decision 19): the issue of its `issue-<n>-…` branch, else the one
@@ -235,12 +210,6 @@ impl Identity {
     }
 }
 
-/// The last segment of `cwd`, a list row's folder name; `cwd` itself when it has none.
-pub(crate) fn folder_name(cwd: &str) -> String {
-    let last = cwd.rsplit('/').next().unwrap_or_default();
-    if last.is_empty() { cwd } else { last }.into()
-}
-
 /// The project a folder whose root is `root` belongs to (spec #659): a task's worktree
 /// `<main>/.claude/worktrees/<task>` belongs to `<main>`, any other root to itself.
 pub(crate) fn project_of(root: &str) -> &str {
@@ -268,63 +237,6 @@ pub(crate) fn claimed(command: &str) -> Option<u64> {
     let mut words = command.split_whitespace();
     words.find(|w| *w == "--claim")?;
     words.next()?.parse().ok()
-}
-
-/// A terminal of the daemon, as its `list` gives it, or as its record of the terminals it ran gives
-/// them after it died (`archive/terminal-daemon/src/lib.rs`). Fields the record lacks are empty.
-#[derive(Clone, Debug, Default, Deserialize)]
-pub struct Terminal {
-    pub id: String,
-    /// What it was spawned with; empty for a login shell.
-    #[serde(default)]
-    pub argv: Vec<String>,
-    #[serde(default)]
-    pub cwd: String,
-    /// Its leader's pid, which leads its session.
-    #[serde(default)]
-    pub pid: Option<u32>,
-    #[serde(default)]
-    pub exited: Option<String>,
-    /// The program in its foreground.
-    #[serde(default)]
-    pub foreground: Option<String>,
-    #[serde(default)]
-    pub processes: Vec<Process>,
-    /// Its program's OSC 7501 root status (danielrispler/Falinks#555): `working`, `blocked`, `done` and the like; `None`
-    /// until it reports and after `clear` or its exit.
-    #[serde(default)]
-    pub state: Option<String>,
-    /// The program's name for itself in its reports, such as `codex` or `claude-code`.
-    #[serde(default)]
-    pub app: Option<String>,
-    /// When the state last changed, in Unix milliseconds.
-    #[serde(default)]
-    pub status_ms: Option<u64>,
-    /// How often its program left `working`: a turn ended each time it went up (danielrispler/Falinks#555).
-    #[serde(default)]
-    pub turn: u64,
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-pub struct Process {
-    pub pid: u32,
-    pub command: String,
-}
-
-/// How a terminal comes back after its daemon is gone, and what a restart now would end.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Revive {
-    pub id: String,
-    pub cwd: String,
-    /// What it reruns: its spawn's argv, or an agent's resume command, empty for a shell.
-    pub argv: Vec<String>,
-    /// The session to reopen with `claude --resume`, for a Claude terminal whose session is known.
-    pub session: Option<String>,
-    /// What runs in it that a restart would end: a program, "a turn" or "background tasks".
-    pub busy: Option<String>,
-    /// Whether it comes back: not a Claude terminal no session links to (#17). Its `claude` never
-    /// sent an event, so no row shows it and it has no conversation to resume.
-    pub revives: bool,
 }
 
 /// What happened in a worktree since the last card on it: a session's own, or a subagent's that
@@ -920,7 +832,7 @@ impl Session {
                 // unseen; widen it if a recorded log shows it does. An unattached subagent with
                 // no spawn call ends too (danielrispler/plotkeeper#67): an id that Claude Code
                 // names in one stray event lists in no `Stop`. A step after its end runs it again.
-                Happened::TurnEnd { .. } if event.agent_id.is_none() => {
+                Happened::TurnEnd if event.agent_id.is_none() => {
                     if let Some(tasks) = event.background_tasks() {
                         let listed = |id: &str| tasks.iter().any(|task| task == id);
                         let children = self.agents.iter().filter(|a| {
@@ -1533,7 +1445,7 @@ impl Session {
     }
 
     pub fn needs_you(&self) -> bool {
-        !self.blocks.is_empty() || self.terminal_blocked
+        !self.blocks.is_empty()
     }
 
     /// How many blocked commands wait on Daniel: blocked, also again, and the session has not moved on (#572).
@@ -1688,22 +1600,6 @@ pub enum State {
     Idle,
     /// From `SessionEnd` until the session starts again under its id.
     Ended,
-}
-
-/// How long a Claude session's hook state and its OSC 7501 state may disagree before the mismatch log
-/// gets a line (danielrispler/Falinks#560); a starting guess.
-pub(crate) const MISMATCH_AFTER_MS: u64 = 5_000;
-
-/// The state an OSC 7501 root state shows (danielrispler/Falinks#560): `working` is running, `blocked` and `error` need
-/// Daniel, and a turn that ended (`done`) or a program waiting (`idle`) is his turn; `None` for a
-/// state the protocol does not list.
-pub(crate) fn shown_state(reported: &str) -> Option<State> {
-    match reported {
-        "working" => Some(State::Running),
-        "blocked" | "error" => Some(State::NeedsYou),
-        "done" | "idle" => Some(State::YourTurn),
-        _ => None,
-    }
 }
 
 /// 2 hours, a starting guess (danielrispler/Falinks#369, decision 4).

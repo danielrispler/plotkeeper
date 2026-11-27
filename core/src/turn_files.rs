@@ -8,22 +8,6 @@ use crate::studio::Roots;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-/// The tools whose call changes the file its input names: Claude Code's, Codex's `apply_patch` and
-/// Cursor's `Delete` (its `Write` is Claude Code's name too, #426).
-const EDITS: [&str; 6] = [
-    "Edit",
-    "MultiEdit",
-    "Write",
-    "NotebookEdit",
-    "apply_patch",
-    "Delete",
-];
-
-/// Whether a call of `tool` edits the file it names.
-pub(crate) fn edits(tool: &str) -> bool {
-    EDITS.contains(&tool)
-}
-
 /// A worktree's two trees of a turn, which the shell diffs. A running turn has no `end` yet: the
 /// shell takes the tree of the worktree as it is now.
 #[derive(Clone, Debug, PartialEq)]
@@ -174,11 +158,8 @@ impl TurnFilesSnapshot {
             let file = row.file.as_deref()?;
             roots_of.inside(root, file).map(str::to_string)
         };
-        for row in others
-            .iter()
-            .filter(|r| r.command.is_some() || edits(&r.tool))
-        {
-            if edits(&row.tool) {
+        for row in others.iter().filter(|r| r.command.is_some() || r.edits()) {
+            if row.edits() {
                 for root in &diff_roots {
                     if let Some(path) = inside(row, root) {
                         (snapshot.others_edits.entry(root.to_string()).or_default()).insert(path);
@@ -193,13 +174,10 @@ impl TurnFilesSnapshot {
                 });
             }
         }
-        for row in ours
-            .iter()
-            .filter(|r| r.command.is_some() || edits(&r.tool))
-        {
+        for row in ours.iter().filter(|r| r.command.is_some() || r.edits()) {
             let seq = snapshot.ours_agents.len();
             snapshot.ours_agents.push(agent(row));
-            if edits(&row.tool) {
+            if row.edits() {
                 for root in &diff_roots {
                     if let Some(path) = inside(row, root) {
                         let paths = snapshot.ours_edits.entry(root.to_string()).or_default();

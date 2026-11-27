@@ -4,7 +4,7 @@
 use crate::common;
 use serde_json::{Value, json};
 use std::path::PathBuf;
-use studio_core::{AgyDriftKind, LogEntry, Parent, Sender, State, Status, Studio};
+use studio_core::{AgyDriftKind, State, Studio};
 
 const RUN: &str = include_str!("fixtures/agy/run.jsonl");
 const PARENT: &str = "145c3c4a-3fac-4c6c-8ffc-b1bd95c0f78a";
@@ -23,7 +23,7 @@ fn fixture() -> Vec<String> {
 }
 
 #[test]
-fn the_recorded_run_replays_to_its_turns_steps_and_subagent() {
+fn the_recorded_run_replays_to_its_turns_steps_and_a_subagent_of_its_own() {
     let studio = Studio::replayed(fixture());
 
     let session = studio.session(PARENT).expect("the agy session");
@@ -34,19 +34,13 @@ fn the_recorded_run_replays_to_its_turns_steps_and_subagent() {
         .collect();
     // Daniel's three prompts, and the wake-up the subagent's report caused.
     assert_eq!(senders, [true, true, true, false]);
-    assert!(matches!(session.prompts[3].sender, Sender::WakeUp(ref id) if id == CHILD));
     assert_eq!(session.turns.len(), 4);
     assert_eq!(session.model.as_deref(), Some("gemini-3.8-flash-high"));
     assert_eq!(session.state, State::YourTurn);
-
-    assert_eq!(session.agents.len(), 1);
-    let child = &session.agents[0];
-    assert_eq!(child.agent.id, CHILD);
-    assert_eq!(child.parent, Parent::Session);
-    assert_eq!(child.name, "Command Runner");
-    assert_eq!(child.status, Status::Completed);
-    assert!(child.ended_at.is_some());
-    assert!(child.prompt.contains("sleep 8"));
+    // agy's payloads name no parent, so its subagent's conversation is a session of its own.
+    assert!(session.agents.is_empty());
+    let child = studio.session(CHILD).expect("the subagent's own row");
+    assert_eq!(child.prompts.len(), 1);
     assert!(studio.agy_drift().is_empty(), "{:?}", studio.agy_drift());
 }
 
@@ -90,7 +84,6 @@ fn line(session: &str, event: &str, at: u64, fields: Value) -> String {
         "cwd": "/tmp/agy-fixture",
         "modelName": "m",
         "studio_received_ms": at,
-        "studio_terminal_id": "t-1",
         "transcriptPath": format!("{}/{session}/.system_generated/logs/transcript_full.jsonl", brain()),
     });
     common::with(base, fields)
@@ -124,69 +117,6 @@ fn a_swapped_tool_pair_leaves_no_running_step() {
         session.agent.last_step, None,
         "the late start opened a step"
     );
-}
-
-#[test]
-fn a_subagent_file_that_appears_late_still_attaches_the_child() {
-    let dir = tempfile::tempdir().unwrap();
-    let generated = dir.path().join("p/.system_generated");
-    std::fs::create_dir_all(generated.join("logs")).unwrap();
-    let path = |s: &str| {
-        format!(
-            "{}/{s}/.system_generated/logs/transcript_full.jsonl",
-            dir.path().display()
-        )
-    };
-    let with = |session: &str, event: &str, at: u64, fields: Value| {
-        let mut l: Value = serde_json::from_str(&line(session, event, at, fields)).unwrap();
-        l["transcriptPath"] = path(session).into();
-        l.to_string()
-    };
-    let mut studio = Studio::default();
-    studio.replay(&with("p", "SessionStart", 1, json!({})));
-    studio.replay(&with("c", "SessionStart", 2, json!({})));
-    studio.replay(&with(
-        "c",
-        "PreInvocation",
-        3,
-        json!({ "invocationNum": 0, "initialNumSteps": 0 }),
-    ));
-    assert_eq!(
-        studio.session("p").unwrap().agents[0].parent,
-        Parent::Unattached
-    );
-
-    std::fs::create_dir_all(generated.join("subagents")).unwrap();
-    std::fs::write(
-        generated.join("subagents/c.json"),
-        json!({ "subagentDescriptor": { "typeName": "self", "role": "Runner" }, "state": "ALIVE", "spawnStepIndex": 5 }).to_string(),
-    )
-    .unwrap();
-    studio.replay(&with(
-        "c",
-        "PreToolUse",
-        4,
-        json!({ "stepIdx": 2, "toolCall": { "name": "run_command", "args": {} } }),
-    ));
-
-    let child = &studio.session("p").unwrap().agents[0];
-    assert_eq!(child.parent, Parent::Session);
-    assert_eq!(child.name, "Runner");
-}
-
-#[test]
-fn a_missing_subagent_file_sends_the_child_to_unattached_at_its_stop() {
-    let mut studio = Studio::default();
-    for l in [
-        line("p", "SessionStart", 1, json!({})),
-        line("c", "SessionStart", 2, json!({})),
-        line("c", "Stop", 3, json!({ "fullyIdle": true })),
-    ] {
-        studio.replay(&l);
-    }
-    let session = studio.session("p").unwrap();
-    assert_eq!(session.agents[0].parent, Parent::Unattached);
-    assert_eq!(session.agents[0].status, Status::Completed);
 }
 
 #[test]
@@ -257,32 +187,6 @@ fn an_unknown_transcript_record_counts_as_drift() {
     assert_eq!(kinds, [AgyDriftKind::Record]);
 }
 
-fn terminal(state: &str) -> studio_core::Terminal {
-    serde_json::from_value(json!({
-        "id": "fixture-terminal", "argv": [], "cwd": "/tmp", "pid": 1, "exited": null,
-        "foreground": "agy", "processes": [], "state": state, "app": "agy",
-        "status_ms": 1, "turn": 0,
-    }))
-    .unwrap()
-}
-
-#[test]
-fn an_agy_session_needs_you_while_its_terminal_reports_blocked() {
-    let mut studio = Studio::replayed(fixture());
-    assert_eq!(studio.session(PARENT).unwrap().state, State::YourTurn);
-
-    let out = studio.terminals(&[terminal("blocked")], 10);
-    let session = studio.session(PARENT).unwrap();
-    assert_eq!(session.state, State::NeedsYou);
-    assert!(session.questions.is_empty());
-    assert!(out.iter().any(
-        |o| matches!(o, studio_core::Output::NeedsYou { session_id, .. } if session_id == PARENT)
-    ));
-
-    studio.terminals(&[terminal("done")], 20);
-    assert_eq!(studio.session(PARENT).unwrap().state, State::YourTurn);
-}
-
 #[test]
 fn a_session_names_its_agent_for_its_mark() {
     assert_eq!(studio_core::AGY_CAPABILITIES.agent, "agy");
@@ -327,97 +231,6 @@ fn a_json_line_with_no_conversation_or_event_name_counts_as_drift() {
     assert_eq!(
         seen,
         [(5, AgyDriftKind::HookEvent), (6, AgyDriftKind::HookEvent)]
-    );
-}
-
-#[test]
-fn a_child_ends_when_its_files_state_changes_with_no_stop() {
-    let dir = tempfile::tempdir().unwrap();
-    let generated = dir.path().join("p/.system_generated");
-    std::fs::create_dir_all(generated.join("subagents")).unwrap();
-    let file = generated.join("subagents/c.json");
-    let write = |state: &str| {
-        let body = json!({ "subagentDescriptor": { "typeName": "self", "role": "Runner" }, "state": state, "spawnStepIndex": 5 });
-        std::fs::write(&file, body.to_string()).unwrap();
-    };
-    let with = |session: &str, event: &str, at: u64, fields: Value| {
-        let mut l: Value = serde_json::from_str(&line(session, event, at, fields)).unwrap();
-        l["transcriptPath"] = format!(
-            "{}/{session}/.system_generated/logs/transcript_full.jsonl",
-            dir.path().display()
-        )
-        .into();
-        l.to_string()
-    };
-    let mut studio = Studio::default();
-    write("ALIVE");
-    studio.replay(&with("p", "SessionStart", 1, json!({})));
-    studio.replay(&with("c", "SessionStart", 2, json!({})));
-    studio.replay(&with("p", "Stop", 3, json!({ "fullyIdle": false })));
-    assert_eq!(
-        studio.session("p").unwrap().agents[0].status,
-        Status::Running
-    );
-
-    write("COMPLETED");
-    studio.replay(&with("p", "Stop", 4, json!({ "fullyIdle": true })));
-
-    let child = &studio.session("p").unwrap().agents[0];
-    assert_eq!(child.status, Status::Completed);
-    assert!(child.ended_at.is_some());
-}
-
-#[test]
-fn a_blocked_agy_session_stops_needing_you_when_its_terminal_goes_or_stops_reporting() {
-    let silent = || {
-        let mut t = terminal("blocked");
-        t.state = None;
-        t
-    };
-    for gone in [vec![], vec![silent()]] {
-        let mut studio = Studio::replayed(fixture());
-        studio.terminals(&[terminal("blocked")], 10);
-        assert_eq!(studio.session(PARENT).unwrap().state, State::NeedsYou);
-
-        studio.terminals(&gone, 20);
-        assert_eq!(studio.session(PARENT).unwrap().state, State::YourTurn);
-    }
-}
-
-#[test]
-fn an_agy_subagents_log_is_its_own_transcript() {
-    let studio = Studio::replayed(fixture());
-
-    let log = studio
-        .subagent_log(PARENT, CHILD, 0)
-        .expect("the child's log");
-    let call = |id: &str, tool: &str, detail: Option<&str>| LogEntry::Call {
-        id: id.into(),
-        tool: tool.into(),
-        detail: detail.map(Into::into),
-    };
-    let result = |id: &str, text: &str| LogEntry::Result {
-        id: id.into(),
-        text: text.into(),
-        failed: false,
-        cut: false,
-    };
-    assert_eq!(
-        log.entries,
-        [
-            LogEntry::Prompt {
-                text: "Please run the shell command 'sleep 8; echo done' and report back once completed."
-                    .into()
-            },
-            call("2", "run_command", Some("Run sleep test command")),
-            result("2", "Command exited with code 0.\n\nCommand output:\ndone"),
-            call("4", "send_message", None),
-            result("4", &format!("Message sent to \"{PARENT}\".")),
-            LogEntry::Reply {
-                text: "The command `sleep 8; echo done` has completed, and the result has been reported back to the parent agent."
-                    .into()
-            },
-        ]
     );
 }
 

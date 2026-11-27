@@ -179,7 +179,6 @@ function clearMachine(sessions) {
   const live = new Map(sessions.map((s) => [s.id, s]));
   const deleted = [];
   const pending = [];
-  const written = [];
   const commits = [];
   const m = clearing(time, {
     landed: (id) => (live.get(id)?.landed ? live.get(id) : undefined),
@@ -187,12 +186,9 @@ function clearMachine(sessions) {
       deleted.push(s.id);
       return new Promise((resolve, reject) => commits.push({ id: s.id, resolve, reject }));
     },
-    changed: (list, writing = []) => {
-      pending.push(list.map((s) => s.id));
-      written.push(writing.map((s) => s.id));
-    },
+    changed: (list) => void pending.push(list.map((s) => s.id)),
   });
-  return { m, time, live, deleted, pending, written, commits };
+  return { m, time, live, deleted, pending, commits };
 }
 const live = (id, state, extra = {}) => /** @type {Session} */ ({ id, state, unseen: false, landed: false, turns: [], questions: [], transcript: {}, ...extra });
 const landed = (id) => live(id, "idle", { landed: true });
@@ -224,18 +220,13 @@ test("committed rows stay hidden until they leave the list, and a Clear before t
   assert.deepEqual([...m.hidden], []);
 });
 
-test("a session stays told to the shell until its delete is written, and a failed delete brings the row back", async () => {
-  const { m, time, written, commits } = clearMachine([landed("a"), landed("b")]);
+test("a failed delete brings the row back", async () => {
+  const { m, time, commits } = clearMachine([landed("a"), landed("b")]);
   m.clear([landed("a"), landed("b")]);
   time.tick(CLEAR_WINDOW_MS);
-  // The window closed with both deletes in flight: the shell still hears both, so a quit now commits them.
-  assert.deepEqual(written.at(-1), ["a", "b"]);
   commits[0].resolve();
-  await new Promise((r) => setImmediate(r));
-  assert.deepEqual(written.at(-1), ["b"]);
   commits[1].reject(new Error("no"));
   await new Promise((r) => setImmediate(r));
-  assert.deepEqual(written.at(-1), []);
   assert.deepEqual([...m.hidden], ["a"]);
 });
 

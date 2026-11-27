@@ -63,13 +63,13 @@ EXPECT
 rm -f "$trust"
 
 cd "$repo"
-PLOTKEEPER_TERMINAL_ID=fixture-terminal agy --mode auto -p "Create hello.txt holding the line hello with a file tool, then run 'cat hello.txt' with the shell. Reply in one short sentence." >/dev/null
+agy --mode auto -p "Create hello.txt holding the line hello with a file tool, then run 'cat hello.txt' with the shell. Reply in one short sentence." >/dev/null
 conversation=$(python3 -I -c '
 import json, sys
 print(json.loads(open(sys.argv[1]).readline().split(" ", 1)[1])["conversationId"])' "$log")
-PLOTKEEPER_TERMINAL_ID=fixture-terminal agy --mode auto --conversation "$conversation" -p="Reply with the word ok." >/dev/null
+agy --mode auto --conversation "$conversation" -p="Reply with the word ok." >/dev/null
 # `-p` waits for the subagent, whose report wakes the conversation up after the turn ended.
-PLOTKEEPER_TERMINAL_ID=fixture-terminal agy --mode auto --conversation "$conversation" -p="Start one subagent in the background to run 'sleep 8; echo done' and report back. After starting it, end your turn right away with one short sentence, without waiting for it." >/dev/null
+agy --mode auto --conversation "$conversation" -p="Start one subagent in the background to run 'sleep 8; echo done' and report back. After starting it, end your turn right away with one short sentence, without waiting for it." >/dev/null
 # The hooks are backgrounded, so the last events may land just after agy exits.
 sleep 3
 
@@ -97,7 +97,6 @@ for raw in open(log):
     event = json.loads(payload)
     event.pop("artifactDirectoryPath", None)
     event["studio_received_ms"] = int(at)
-    event["studio_terminal_id"] = "fixture-terminal"
     if event["conversationId"] not in conversations:
         conversations.append(event["conversationId"])
     lines.append(clean(json.dumps(event, sort_keys=True)))

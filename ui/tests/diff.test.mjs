@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { El, fakeDocument, tauri } from "./dom.mjs";
 
 globalThis.document = fakeDocument();
-const { diffLines, drawDiff, keepsDiff, newestDiff } = await import("../../dist/diff.js");
+const { diffLines, drawDiff, newestDiff } = await import("../../dist/diff.js");
 
 // A file without its `agent`, which the pane does not read.
 /** @returns {import("../../dist/types.js").TurnFile} */
@@ -25,14 +25,6 @@ test("the palette opens the newest turn with files; an agent without trees has n
   assert.equal(newestDiff(turns, { turn_trees: true }), 1);
   assert.equal(newestDiff(turns, { turn_trees: false }), null);
   assert.equal(newestDiff([turn(null)], { turn_trees: true }), null);
-});
-
-test("the shell's re-sent selection keeps the diff; a click or another session ends it", () => {
-  assert.equal(keepsDiff({ session: "s" }, { id: "s" }, false), true);
-  assert.equal(keepsDiff({ session: "s" }, { id: "s" }, true), false);
-  assert.equal(keepsDiff({ session: "s" }, { id: "t" }, false), false);
-  assert.equal(keepsDiff({ session: "s" }, null, false), false);
-  assert.equal(keepsDiff(null, { id: "s" }, false), false);
 });
 
 test("the pane lists the agent's files with counts, each hunk read whole, and no external fold", async () => {

@@ -203,9 +203,6 @@ pub fn answered_line(payload: &Value, answer: &Value) -> Value {
     line["hook_event_name"] = "StudioAnswer".into();
     line["studio_answer"] = answer;
     line["studio_received_ms"] = now_ms().into();
-    if let Ok(terminal) = std::env::var("PLOTKEEPER_TERMINAL_ID") {
-        line["studio_terminal_id"] = terminal.into();
-    }
     line
 }
 

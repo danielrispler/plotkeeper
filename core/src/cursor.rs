@@ -63,7 +63,6 @@ struct Raw {
     tool_use_id: String,
     #[serde(default)]
     studio_received_ms: u64,
-    studio_terminal_id: Option<String>,
     studio_pid: Option<u32>,
     /// The trees the hook recorded for the turn, as for Claude Code's (#426).
     #[serde(default)]
@@ -78,17 +77,22 @@ pub(crate) fn parse(line: &str) -> Result<Event, serde_json::Error> {
     serde_json::from_str::<Raw>(line).map(adapt)
 }
 
+/// What a call of tool `name` is.
 // hook/src/lib.rs's `cursor_shaped` keeps a copy of the tool names, as the hook does not depend on core.
-fn tool(raw: &Raw) -> Tool {
-    let name = raw.tool_name.clone().unwrap_or_default();
-    let input = &raw.tool_input;
-    let kind = match name.as_str() {
+pub(crate) fn kind(name: &str) -> ToolKind {
+    match name {
         "Write" | "Delete" => ToolKind::Edit,
         "Shell" => ToolKind::Command,
         "Task" => ToolKind::Spawn,
         _ if name.starts_with("MCP:") => ToolKind::External,
         _ => ToolKind::Other,
-    };
+    }
+}
+
+fn tool(raw: &Raw) -> Tool {
+    let name = raw.tool_name.clone().unwrap_or_default();
+    let input = &raw.tool_input;
+    let kind = kind(&name);
     let text = |key: &str| input[key].as_str().map(String::from);
     Tool {
         path: (kind == ToolKind::Edit)
@@ -118,9 +122,7 @@ fn adapt(raw: Raw) -> Event {
         }),
         "afterAgentResponse" => happened.push(Happened::Reply(raw.text.clone())),
         "stop" if raw.status == "aborted" => happened.push(Happened::Interrupted),
-        "stop" => happened.push(Happened::TurnEnd {
-            background_pending: false,
-        }),
+        "stop" => happened.push(Happened::TurnEnd),
         // The call is recorded at its end: its start, then its end.
         "postToolUse" | "postToolUseFailure" => {
             happened.push(Happened::ToolStart {
@@ -150,7 +152,6 @@ fn adapt(raw: Raw) -> Event {
         transcript_path: raw.transcript_path.unwrap_or_default(),
         prompt_id: raw.generation_id.filter(|g| !g.is_empty()),
         studio_received_ms: raw.studio_received_ms,
-        studio_terminal_id: raw.studio_terminal_id,
         studio_pid: raw.studio_pid,
         studio_turn_start: raw.studio_turn_start,
         studio_turn_end: raw.studio_turn_end,

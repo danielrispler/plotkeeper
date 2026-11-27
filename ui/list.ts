@@ -126,8 +126,6 @@ function markNode(session: Session): HTMLElement {
   const node = text("span", rowMark(session), "id");
   node.setAttribute("data-key", `mark-${session.id}`);
   // A span is no button: its hint opens once the helper's pointer path reaches it (#586).
-  if (session.shell) return mark(node, "A plain terminal", "start");
-  if (session.status_only) return mark(node, "Another agent, followed by its reported status only", "start");
   const context = contextTitle(session.transcript.context);
   return context ? mark(node, context, "start") : node;
 }
@@ -293,7 +291,6 @@ export function item(key: string, depth: number, toggle: { open: boolean; hiding
 
 /** A session row's delete (decision of the session list's fold and delete): the rail's dialog, asked from the row. */
 export function deleting(session: Session): HTMLElement | null {
-  if (session.status_only) return null;
   // `patch` keeps the first button and its listener, so the press reads the session as it is now.
   const now = () => studio.listed.find((listed) => listed.id === session.id) ?? session;
   const button = icon("delete", CROSS, () => void deps.askDelete(now()).catch(failure("delete", "error")));

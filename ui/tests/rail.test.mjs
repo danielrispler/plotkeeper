@@ -165,8 +165,8 @@ const ended = (n, fields = {}) => ({ started_at: NOW - (10 - n) * 60e3, ended_at
 /** @returns {any} */
 const sessionOf = (fields = {}) => ({
   id: "s1", capabilities: { agent: "claude", asks: true, replies: true, turn_trees: true, permission_mode: true }, model: null, cwd: "/w/p", folder_name: "p",
-  terminal: null, status_only: false, shell: false, name: "Story", prompt_name: null, resume_id: "r", permission_mode: null, started_mode: null, cleared: [],
-  asks_before_closing: false, landed: false, last_step: null, started_at: NOW - 3600e3, last_event_at: NOW, turn_span: null, step_span: null, state: "your_turn",
+  name: "Story", prompt_name: null, resume_id: "r", permission_mode: null, cleared: [],
+  landed: false, last_step: null, started_at: NOW - 3600e3, last_event_at: NOW, turn_span: null, step_span: null, state: "your_turn",
   agents: [], asker: null, prompts: [], turns: [ended(1), ended(2)], questions: [], blocked_commands: [], returned: null,
   transcript: { intention: null, steps_ago: 0, unavailable: null, responses: ["Reply 2.\nMore of reply 2."], effort: null, context: null },
   identity: { issue: null, pr: null, name: "p" }, work: { kind: null, phases: [], agent_ms: 0, estimate: { range: null, depends_on_you: false } }, seen: 2, since_looked: { turns: 0 },

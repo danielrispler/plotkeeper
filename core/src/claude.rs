@@ -106,8 +106,6 @@ struct Raw {
     permission_mode: Option<String>,
     /// On a tool's result, how long its call took.
     duration_ms: Option<u64>,
-    /// The terminal the session runs in, which the hook records from `PLOTKEEPER_TERMINAL_ID`.
-    studio_terminal_id: Option<String>,
     /// The agent's process, from the hook (#330).
     studio_pid: Option<u32>,
     /// The trees the hook recorded at a turn's first touch of each worktree, by root (danielrispler/Falinks#486).
@@ -140,11 +138,10 @@ pub(crate) fn parse(line: &str) -> Result<Event, serde_json::Error> {
     }
 }
 
-fn tool(raw: &Raw) -> Tool {
-    let name = raw.tool_name.clone().unwrap_or_default();
-    let input = &raw.tool_input;
-    let kind = match name.as_str() {
-        "Edit" | "Write" => ToolKind::Edit,
+/// What a call of tool `name` with `input` is.
+pub(crate) fn kind(name: &str, input: &Value) -> ToolKind {
+    match name {
+        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => ToolKind::Edit,
         "Bash" => ToolKind::Command,
         "Agent" => ToolKind::Spawn,
         "Skill" => ToolKind::Skill(input["skill"].as_str().map(Into::into)),
@@ -152,10 +149,19 @@ fn tool(raw: &Raw) -> Tool {
         PLAN_TOOL => ToolKind::Plan,
         _ if name.starts_with("mcp__") => ToolKind::External,
         _ => ToolKind::Other,
-    };
+    }
+}
+
+fn tool(raw: &Raw) -> Tool {
+    let name = raw.tool_name.clone().unwrap_or_default();
+    let input = &raw.tool_input;
+    let kind = kind(&name, input);
+    let path = input["file_path"]
+        .as_str()
+        .or(input["notebook_path"].as_str());
     Tool {
         path: (kind == ToolKind::Edit)
-            .then(|| input["file_path"].as_str().map(Into::into))
+            .then(|| path.map(Into::into))
             .flatten(),
         command: (kind == ToolKind::Command)
             .then(|| input["command"].as_str().map(Into::into))
@@ -209,13 +215,7 @@ fn adapt(raw: Raw) -> Event {
             }
         }
         "Stop" => {
-            let pending = raw
-                .background_tasks
-                .as_array()
-                .is_some_and(|t| !t.is_empty());
-            happened.push(Happened::TurnEnd {
-                background_pending: pending,
-            });
+            happened.push(Happened::TurnEnd);
             happened.push(Happened::Reply(raw.last_assistant_message.clone()));
         }
         "SubagentStop" => {
@@ -328,7 +328,6 @@ fn adapt(raw: Raw) -> Event {
         transcript_path: raw.transcript_path,
         prompt_id: raw.prompt_id,
         studio_received_ms: raw.studio_received_ms,
-        studio_terminal_id: raw.studio_terminal_id,
         studio_pid: raw.studio_pid,
         studio_turn_start: raw.studio_turn_start,
         studio_turn_end: raw.studio_turn_end,

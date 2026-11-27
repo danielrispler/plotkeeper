@@ -11,9 +11,10 @@ autotests = false
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The atomic write's temporary file beside its target.
+tempfile = "3"
 
 [dev-dependencies]
-tempfile = "3"
 studio-test-support = { path = "../test-support" }
 
 [[test]]

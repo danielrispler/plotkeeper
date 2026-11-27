@@ -3,13 +3,10 @@
 use crate::common::{feed, hook, scratch};
 use std::{fs, process::Stdio};
 
-fn run(terminal: Option<&str>, payload: serde_json::Value, name: &str) -> (bool, String) {
+fn run(payload: serde_json::Value, name: &str) -> (bool, String) {
     let home = scratch(&format!("agy-{name}"));
     let mut cmd = hook(&home);
     cmd.stdout(Stdio::piped());
-    if let Some(t) = terminal {
-        cmd.env("PLOTKEEPER_TERMINAL_ID", t);
-    }
     let out = feed(cmd, &payload).wait_with_output().unwrap();
     assert!(out.status.success());
     assert!(out.stdout.is_empty());
@@ -22,13 +19,10 @@ fn agy() -> serde_json::Value {
 }
 
 #[test]
-fn an_agy_event_outside_a_studio_terminal_is_logged_without_one() {
-    let (written, log) = run(None, agy(), "unset");
+fn an_agy_event_from_any_terminal_is_logged() {
+    let (written, log) = run(agy(), "unset");
     assert!(written);
-    assert!(
-        log.contains("c-1") && !log.contains("studio_terminal_id"),
-        "{log}"
-    );
+    assert!(log.contains("c-1"), "{log}");
 }
 
 #[test]
@@ -50,15 +44,8 @@ fn an_event_from_a_plotkeeper_run_writes_nothing() {
 }
 
 #[test]
-fn an_agy_event_in_a_studio_terminal_is_logged_with_it() {
-    let (_, log) = run(Some("t-9"), agy(), "set");
-    assert!(log.contains("\"studio_terminal_id\":\"t-9\""), "{log}");
-    assert!(log.contains("c-1"));
-}
-
-#[test]
-fn a_claude_event_outside_a_studio_terminal_is_still_logged() {
+fn a_claude_event_from_any_terminal_is_logged() {
     let claude = serde_json::json!({ "session_id": "s-1", "hook_event_name": "Stop", "cwd": "/" });
-    let (_, log) = run(None, claude, "claude");
+    let (_, log) = run(claude, "claude");
     assert!(log.contains("s-1"));
 }

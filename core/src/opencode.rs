@@ -73,7 +73,6 @@ struct Raw {
     last_assistant_message: String,
     #[serde(default)]
     studio_received_ms: u64,
-    studio_terminal_id: Option<String>,
     studio_pid: Option<u32>,
 }
 
@@ -82,15 +81,20 @@ pub(crate) fn parse(line: &str) -> Result<Event, serde_json::Error> {
     serde_json::from_str::<Raw>(line).map(adapt)
 }
 
-/// A call of tool `name` with `input`, in session folder `cwd`. OpenCode's tools take a `path`
-/// relative to it, or absolute; the call's input names it absolute, as the ledger reads it there.
-fn tool(name: &str, input: &Value, cwd: &str) -> Tool {
-    let kind = match name {
+/// What a call of tool `name` is.
+pub(crate) fn kind(name: &str) -> ToolKind {
+    match name {
         "write" | "edit" | "patch" => ToolKind::Edit,
         "shell" => ToolKind::Command,
         "question" => ToolKind::Question,
         _ => ToolKind::Other,
-    };
+    }
+}
+
+/// A call of tool `name` with `input`, in session folder `cwd`. OpenCode's tools take a `path`
+/// relative to it, or absolute; the call's input names it absolute, as the ledger reads it there.
+fn tool(name: &str, input: &Value, cwd: &str) -> Tool {
+    let kind = kind(name);
     let mut input = input.clone();
     let path = input["path"].as_str().map(|path| {
         let path = std::path::Path::new(cwd).join(path);
@@ -127,9 +131,7 @@ fn adapt(raw: Raw) -> Event {
         "session.execution.succeeded"
         | "session.execution.failed"
         | "session.execution.interrupted" => {
-            happened.push(Happened::TurnEnd {
-                background_pending: false,
-            });
+            happened.push(Happened::TurnEnd);
             happened.push(Happened::Reply(raw.last_assistant_message.clone()));
             if let Some(model) = raw.model.clone() {
                 happened.push(Happened::Model(model));
@@ -181,7 +183,6 @@ fn adapt(raw: Raw) -> Event {
         transcript_path: String::new(),
         prompt_id: raw.prompt_id,
         studio_received_ms: raw.studio_received_ms,
-        studio_terminal_id: raw.studio_terminal_id,
         studio_pid: raw.studio_pid,
         studio_turn_start: Default::default(),
         studio_turn_end: Default::default(),

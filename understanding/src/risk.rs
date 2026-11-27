@@ -1,12 +1,11 @@
 //! The risk note (danielrispler/plotkeeper#296, #298): the card writer's one line on what a blocked command would do if
 //! allowed, led by its risk level, written from the command and its folder alone.
 
-use crate::{CardWriter, ClaudeWriter, WriterRequest, parse_object};
+use crate::{CardWriter, ClaudeWriter, WriterRequest, read_object};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashSet},
-    fs,
-    io::{self, Write},
+    fs, io,
     path::{Path, PathBuf},
     process::Command,
     sync::Mutex,
@@ -48,7 +47,7 @@ impl Risk {
         }
         // Nothing of the reply goes in the message but its head, in quotes, which the log's scrubbing cuts: a serde error
         // may name the reply's own words.
-        let read = parse_object(reply).and_then(serde_json::from_value::<Reply>);
+        let read = read_object::<Reply>(reply);
         #[allow(
             clippy::map_err_ignore,
             reason = "a serde error may name the reply's own words, which the message must not hold (the comment above)"
@@ -220,11 +219,7 @@ impl RiskNotes {
         };
         let note = RiskNote { level, line, at };
         self.kept.entry(key.0).or_default().insert(key.1, note);
-        let written = self.path.with_extension("json.tmp");
-        let mut file = fs::File::create(&written)?;
-        file.write_all(&serde_json::to_vec(&self.kept)?)?;
-        file.sync_all()?;
-        fs::rename(written, &self.path)
+        studio_workbench::write_atomic(&self.path, &serde_json::to_vec(&self.kept)?)
     }
 
     /// What each card of `session` shows of its note; a card nobody asked a note for has none.

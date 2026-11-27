@@ -136,3 +136,60 @@ pub(crate) fn run(root: &str, command: &str, args: &[&str]) -> std::process::Out
         .output()
         .unwrap()
 }
+
+/// `imports --json` of the repository at `root`.
+pub(crate) fn imports_json(root: &str) -> Value {
+    let out = run(root, "imports", &["--json"]);
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+/// Each file pair's import sites in `check --json` with `args`, as `from>to file:line`, sorted.
+pub(crate) fn sites(root: &str, args: &[&str]) -> Vec<String> {
+    let out = run(root, "check", &[&["--json"], args].concat());
+    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let mut found = Vec::new();
+    for edge in value["edges"].as_array().into_iter().flatten() {
+        for pair in edge["pairs"].as_array().unwrap() {
+            for site in pair["sites"].as_array().unwrap() {
+                found.push(format!(
+                    "{}>{} {}:{}",
+                    pair["from"].as_str().unwrap(),
+                    pair["to"].as_str().unwrap(),
+                    site["file"].as_str().unwrap(),
+                    site["line"]
+                ));
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+/// Asserts that `check` on `root` notes only `note` on stderr, and that its one problem is the import link `from` to
+/// `to` with no dependency behind it: the links to the candidates of an unsure import pass as unproven, any other
+/// link of the part still fails.
+pub(crate) fn assert_only_candidate_links_relaxed(root: &str, note: &str, from: &str, to: &str) {
+    let out = run(root, "check", &[]);
+    assert_eq!(String::from_utf8_lossy(&out.stderr), note);
+    let problems = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(problems.lines().count(), 1, "{problems}");
+    let link = format!(
+        "import link \"{from}-{to}\" runs from \"{from}\" to \"{to}\", but the code shows no dependency"
+    );
+    assert!(problems.starts_with(&link), "{problems}");
+}
+
+/// Asserts that `imports --json` on `root` lists `file` as unsure for a name declared twice, and that `check` passes
+/// counting the relaxed link as unproven.
+pub(crate) fn assert_unsure_file_listed_and_link_unproven(root: &str, file: &str) {
+    let value = imports_json(root);
+    assert_eq!(value["unsure"][0]["file"], file);
+    assert_eq!(value["unsure"][0]["reason"], "declared twice");
+    let out = run(root, "check", &[]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert!(
+        stdout.contains("1 import (0 proven, 1 unproven)"),
+        "{stdout}"
+    );
+}

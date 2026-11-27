@@ -201,9 +201,8 @@ Report only defects you can tie to a line the change adds or edits. Give each on
  * @param {{ schema?: unknown; prompt?: string; env: NodeJS.ProcessEnv }} call
  */
 export const agyCall = (opts, { schema, prompt, env }) => {
-  const { PLOTKEEPER_TERMINAL_ID: _, ...rest } = env;
   const args = ["--model", opts.model, "--print-timeout", `${TIMEOUT_MINUTES}m`];
-  return { args: [...args, "--output-format", "json", "--json-schema", schema, "-p", prompt], env: { ...rest, PLOTKEEPER_INTERNAL: "1" } };
+  return { args: [...args, "--output-format", "json", "--json-schema", schema, "-p", prompt], env: { ...env, PLOTKEEPER_INTERNAL: "1" } };
 };
 
 // The verdict of a finished `agy` run. `reads` is how many reads the hook allowed: with none, the

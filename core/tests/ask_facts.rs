@@ -85,13 +85,7 @@ fn session() -> (Studio, std::path::PathBuf, tempfile::TempDir) {
         "npm run check",
         "Exit code 2\nline one\nerror: it broke",
     ));
-    let dir = tempfile::tempdir().unwrap();
-    let log = dir.path().join("events.jsonl");
-    std::fs::write(
-        &log,
-        lines.iter().map(|l| format!("{l}\n")).collect::<String>(),
-    )
-    .unwrap();
+    let (log, dir) = logged(&lines);
     (Studio::replayed(&lines), log, dir)
 }
 
@@ -225,4 +219,124 @@ fn a_files_facts_leave_out_another_worktrees_file_of_the_same_relative_path() {
         "{:?}",
         labels(&facts)
     );
+}
+
+/// `lines` as the log file holds them, and a log file holding them.
+fn logged(lines: &[String]) -> (std::path::PathBuf, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("events.jsonl");
+    let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
+    std::fs::write(&log, text).unwrap();
+    (log, dir)
+}
+
+/// A Copilot CLI session in `/w/hello` whose one turn creates `hello.txt`.
+fn copilot_create() -> Vec<String> {
+    let line = |name: &str, ms: u64, extra: Value| {
+        let base = json!({
+            "sessionId": "cs-1", "timestamp": ms, "cwd": "/w/hello", "studio_event": name,
+            "studio_agent": "copilot", "studio_received_ms": ms,
+        });
+        common::with(base, extra)
+    };
+    let args = json!({ "path": "/w/hello/hello.txt", "file_text": "hello\n" }).to_string();
+    let result = json!({ "resultType": "success", "textResultForLlm": "Created" });
+    vec![
+        line("sessionStart", 1_000, json!({ "source": "new" })),
+        line(
+            "userPromptSubmitted",
+            2_000,
+            json!({ "prompt": "Add hello.txt" }),
+        ),
+        line(
+            "preToolUse",
+            3_000,
+            json!({ "toolName": "create", "toolArgs": args }),
+        ),
+        line(
+            "postToolUse",
+            4_000,
+            json!({ "toolName": "create", "toolArgs": args, "toolResult": result }),
+        ),
+        line("agentStop", 5_000, json!({ "stopReason": "end_turn" })),
+    ]
+}
+
+/// A Claude Code session whose one turn makes the call `tool` with `input`.
+fn claude_edit(tool: &str, input: Value) -> Vec<String> {
+    let mut lines = vec![line(
+        "UserPromptSubmit",
+        0,
+        json!({ "prompt": "Fix the parser" }),
+    )];
+    lines.extend(call(1_000, "e1", tool, input, None));
+    lines
+}
+
+/// What edits a file is the kind of call each agent's adapter records, not a list of tool names
+/// (#723): every agent's edit is a step that edited the file.
+#[test]
+fn a_files_facts_list_every_agents_edit_as_a_step_that_edited_it() {
+    let agy_brain =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/agy/brain");
+    let agy =
+        include_str!("fixtures/agy/run.jsonl").replace("@BRAIN@", &agy_brain.display().to_string());
+    let fixture = |text: &str| text.lines().map(String::from).collect::<Vec<_>>();
+    let notebook = json!({ "notebook_path": "/w/repo/src/parse.ipynb", "new_source": "x" });
+    let cases = [
+        (
+            "qwen write_file",
+            fixture(include_str!("fixtures/qwen/run.jsonl")),
+            "5c0e1f7a-2b3d-4e8f-9a10-b2c3d4e5f601",
+            ("/Users/me/work/hello", "hello.txt"),
+            "write_file by the session's agent",
+        ),
+        (
+            "copilot create",
+            copilot_create(),
+            "cs-1",
+            ("/w/hello", "hello.txt"),
+            "create by the session's agent",
+        ),
+        (
+            "agy write_file",
+            fixture(&agy),
+            "145c3c4a-3fac-4c6c-8ffc-b1bd95c0f78a",
+            ("/tmp/agy-fixture", "hello.txt"),
+            "write_file by the session's agent",
+        ),
+        (
+            "claude MultiEdit",
+            claude_edit("MultiEdit", json!({ "file_path": "/w/repo/src/parse.rs" })),
+            SESSION,
+            (CWD, "src/parse.rs"),
+            "MultiEdit by the session's agent",
+        ),
+        (
+            "claude NotebookEdit",
+            claude_edit("NotebookEdit", notebook),
+            SESSION,
+            (CWD, "src/parse.ipynb"),
+            "NotebookEdit by the session's agent",
+        ),
+    ];
+    for (case, lines, session, (root, path), step) in cases {
+        let (log, _dir) = logged(&lines);
+        let anchor = Anchor::File {
+            turn: 0,
+            root: root.into(),
+            path: path.into(),
+            from: None,
+        };
+        let facts = Studio::replayed(&lines)
+            .ask_facts(session, &anchor, &log)
+            .unwrap();
+        let edited = facts
+            .sections
+            .iter()
+            .find(|s| s.label == "Steps that edited it");
+        let steps: Option<Vec<&str>> =
+            edited.map(|s| s.facts.iter().map(|f| f.text.as_str()).collect());
+        assert_eq!(steps, Some(vec![step]), "{case}: {:?}", labels(&facts));
+    }
 }

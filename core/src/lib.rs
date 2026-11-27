@@ -44,9 +44,9 @@ pub use output::{
 };
 pub use qwen::CAPABILITIES as QWEN_CAPABILITIES;
 pub use session::{
-    Agent, Answer, BlockedCommand, BlockedStatus, Decision, Identity, Kind, Parent, Process,
-    Prompt, Question, Revive, Sender, Session, SinceSeen, Source, Span, State, Status, Step,
-    Stopped, Subagent, Terminal, Turn,
+    Agent, Answer, BlockedCommand, BlockedStatus, Decision, Identity, Kind, Parent, Prompt,
+    Question, Sender, Session, SinceSeen, Source, Span, State, Status, Step, Stopped, Subagent,
+    Turn,
 };
 pub use studio::{BranchQuery, Selection, Studio, TaskFacts, TaskQuery};
 pub use transcript::{Context, LogEntry, SubagentLog, SubagentLogFile, Transcript};

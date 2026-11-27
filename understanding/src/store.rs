@@ -7,8 +7,7 @@ use crate::{Answered, Card, DesignLine, OpenItem, Quiz, TurnSummary, answered};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
-    fs::{self, File},
-    io::{self, Write},
+    fs, io,
     path::{Path, PathBuf},
 };
 use studio_core::{CardRequest, Decision, LiveFacts, Session, Step, Studio, SummaryRequest};
@@ -586,12 +585,8 @@ impl CardStore {
     }
 }
 
-/// Writes `value` to a file beside `path` and renames it over `path`, so an app that dies mid-write
-/// leaves the previous file whole.
+/// Writes `value` as `path` by the workbench's atomic write, so an app that dies mid-write leaves the previous
+/// file whole.
 fn write(path: &Path, value: &impl Serialize) -> io::Result<()> {
-    let written = path.with_extension("json.tmp");
-    let mut file = File::create(&written)?;
-    file.write_all(&serde_json::to_vec(value)?)?;
-    file.sync_all()?;
-    fs::rename(written, path)
+    studio_workbench::write_atomic(path, &serde_json::to_vec(value)?)
 }

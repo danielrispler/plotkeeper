@@ -2,7 +2,7 @@
 // `tsc` output. The list itself comes from the login shell's `command -v` (`understanding/tests/contract.rs` fakes its PATH).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { briefsLine, choiceOptions, gateNotice, keyLine, keySet, preset, testLine } from "../../dist/writers.js";
+import { briefsLine, choiceOptions, keyLine, keySet, preset, testLine } from "../../dist/writers.js";
 
 const claude = (found) => ({ kind: "claude", name: "Claude", found, models: ["haiku", "sonnet", "opus", "fable"], efforts: ["", "low", "medium", "high"] });
 const agy = (found) => ({ kind: "agy", name: "agy", found, models: ["gemini-4-neon-low", "gemini-4-neon-high"], efforts: [] });
@@ -62,11 +62,6 @@ test("each Test outcome is its line, passed or failed", () => {
     assert.equal(line.passed, false, outcome);
     assert.match(line.text, /^Failed: /, outcome);
   }
-});
-
-test("the gate: summaries off until a Test passes says so in the writer's notice line", () => {
-  assert.match(gateNotice(list([claude(true)], false)), /^Summaries are off: .*Test/);
-  assert.equal(gateNotice(list([claude(true)], true)), null);
 });
 
 test("without claude, briefs need Claude", () => {

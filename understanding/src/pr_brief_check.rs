@@ -129,17 +129,6 @@ pub fn claim_prompt(brief: &Brief) -> String {
     )
 }
 
-/// The `{ ... }` object in a reply's text (or in the whole `claude` envelope).
-fn object_in(text: &str) -> Result<Value, String> {
-    let text = crate::pr_brief::read_envelope(text)?.text;
-    let (a, b) = text
-        .find('{')
-        .zip(text.rfind('}'))
-        .filter(|(a, b)| a < b)
-        .ok_or("the reply holds no JSON object")?;
-    serde_json::from_str(&text[a..=b]).map_err(|e| format!("the reply's JSON does not read: {e}"))
-}
-
 /// A claim the checker found unsupported.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClaimFlag {
@@ -151,7 +140,7 @@ pub struct ClaimFlag {
 /// verdict on every entry is malformed, and then nothing at all is taken from it. An id the brief does not
 /// have is ignored.
 pub fn read_claim_reply(text: &str, brief: &Brief) -> Result<Vec<ClaimFlag>, String> {
-    let v = object_in(text)?;
+    let v: Value = crate::pr_brief::object_in(text)?;
     let entries = v
         .get("items")
         .and_then(Value::as_array)
@@ -226,7 +215,7 @@ pub fn retry_prompt(facts: &Facts, brief: &Brief) -> Option<String> {
 /// Puts the retry's rewrites into the items that were flagged and returns their ids. A rewrite of an item that
 /// was not flagged, or of one the brief does not have, or one that does not read, is ignored.
 fn apply_retry(brief: &mut Brief, text: &str) -> Result<BTreeSet<String>, String> {
-    let v = object_in(text)?;
+    let v: Value = crate::pr_brief::object_in(text)?;
     let entries = v
         .get("items")
         .and_then(Value::as_array)

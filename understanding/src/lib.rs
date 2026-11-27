@@ -266,7 +266,7 @@ pub fn ask_about(
     question: &str,
 ) -> Result<String, String> {
     let reply = writer.ask(item, &transcript.intentions(), question)?;
-    let value = parse_object(&reply).unwrap_or_default();
+    let value: serde_json::Value = read_object(&reply).unwrap_or_default();
     match value["answer"].as_str().map(str::trim) {
         Some(answer) if !answer.is_empty() => Ok(answer.into()),
         _ => Err("the writer's reply holds no answer".into()),
@@ -317,16 +317,15 @@ pub fn why_not(
     })
 }
 
-/// The JSON object in a writer's reply, perhaps in a code fence: from its first `{` to its last `}`.
-fn object(reply: &str) -> &str {
+/// The JSON object in a writer's reply, perhaps in a code fence or with words around it (from its first `{` to its last
+/// `}`), read as a `T`: the one place a reply is read. The error is `None` when the reply holds no object, else why the
+/// object does not read as a `T`.
+pub(crate) fn read_object<T: serde::de::DeserializeOwned>(
+    reply: &str,
+) -> Result<T, Option<serde_json::Error>> {
     let object = reply.find('{').zip(reply.rfind('}'));
-    let object = object.filter(|(start, end)| start < end);
-    object.map_or("", |(start, end)| &reply[start..=end])
-}
-
-/// The JSON object in a writer's reply, parsed: the one place a reply is read.
-pub(crate) fn parse_object(reply: &str) -> Result<serde_json::Value, serde_json::Error> {
-    serde_json::from_str(object(reply))
+    let (start, end) = object.filter(|(start, end)| start < end).ok_or(None)?;
+    serde_json::from_str(&reply[start..=end]).map_err(Some)
 }
 
 /// Asks a writer once more when `retry` says the `first` result cannot stand, and `pick` chooses between the second
@@ -349,7 +348,7 @@ const HOLDS_NONE: &str = "the reply holds none";
 
 /// The Goal in a writer's reply, when it holds one that is not empty, or else why not, for the log.
 fn goal_in(reply: &str) -> Result<String, String> {
-    let value = parse_object(reply).unwrap_or_default();
+    let value: serde_json::Value = read_object(reply).unwrap_or_default();
     match value["goal"].as_str().map(str::trim) {
         Some(goal) if !goal.is_empty() => Ok(goal.into()),
         _ => Err(HOLDS_NONE.into()),
@@ -1206,13 +1205,26 @@ Reply with one JSON object and nothing else: {"answer": string}, the answer in a
 
 #[cfg(test)]
 mod reply_tests {
-    use super::{once_more, parse_object};
+    use super::{once_more, read_object};
 
+    /// The object is found in the bare reply and in one with words or a code fence around it; a reply with no `{ … }`
+    /// in order says it holds none, and an object that does not read says why.
     #[test]
-    fn a_reply_in_a_code_fence_parses_to_its_object() {
-        let value = parse_object("Here:\n```json\n{\"goal\": \"x\"}\n```").unwrap();
-        assert_eq!(value["goal"], "x");
-        assert!(parse_object("no object here").is_err());
+    fn read_object_finds_the_object_or_says_why_not() {
+        // `Err(true)`: the object does not read; `Err(false)`: the reply holds none.
+        let cases: [(&str, Result<i64, bool>); 5] = [
+            ("{\"n\": 1}", Ok(1)),
+            ("Sure:\n```json\n{\"n\": 2}\n```\nDone.", Ok(2)),
+            ("} then {", Err(false)),
+            ("no object at all", Err(false)),
+            ("{\"n\": }", Err(true)),
+        ];
+        for (reply, want) in cases {
+            let got = read_object::<serde_json::Value>(reply)
+                .map(|v| v["n"].as_i64().unwrap_or_default())
+                .map_err(|e| e.is_some());
+            assert_eq!(got, want, "{reply}");
+        }
     }
 
     #[test]

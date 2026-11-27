@@ -37,14 +37,8 @@ export function contextTitle(context: Context | null): string {
   return context ? `${thousands(context.tokens)} tokens used` : "";
 }
 
-/**
- * The muted mark after a row's name: "terminal" for a plain terminal's row, "status only" for another agent's row
- * (danielrispler/Falinks#560), so it never reads as a Claude session with missing data; else the context's tokens. The
- * agent itself is the logo before the name (#158).
- */
-export function rowMark(session: Pick<Session, "shell" | "status_only" | "transcript">): string {
-  if (session.shell) return "terminal";
-  if (session.status_only) return "status only";
+/** The muted mark after a row's name: the context's tokens. The agent itself is the logo before the name (#158). */
+export function rowMark(session: Pick<Session, "transcript">): string {
   return contextText(session.transcript.context);
 }
 
@@ -78,10 +72,8 @@ export function status(state: string, unseen = false, landed = false, unwatched 
 // (a plan or a permission); while it runs, its Intention, else its current step; once it finished unseen, its last turn's Headline
 // (`headline`). Null otherwise, and on a landed row, which reads as landed.
 type Lined = Pick<Session, "state" | "line" | "questions"> &
-  Partial<Pick<Session, "unseen" | "landed" | "turns">> & { status_only?: boolean; blocked_commands?: Pick<BlockedCommand, "status">[]; transcript?: { intention?: string | null } };
+  Partial<Pick<Session, "unseen" | "landed" | "turns">> & { blocked_commands?: Pick<BlockedCommand, "status">[]; transcript?: { intention?: string | null } };
 export function secondLine<T extends Lined>(session: T, headline: (session: T) => string | null = () => null): string | null {
-  // A status-only row has no step or question to show (danielrispler/Falinks#560).
-  if (session.status_only) return null;
   const open = session.questions.filter((question) => question.answer === "open").at(-1);
   // Blocked commands that wait on Daniel until the session moves on (danielrispler/plotkeeper#173, #572).
   const waiting = (session.blocked_commands ?? []).filter((card) => blockedWaits(card.status)).length;
@@ -208,38 +200,29 @@ export function stripLabels(sessions: Pick<Session, "name" | "identity" | "folde
  */
 export type Clock = { set(run: () => void, ms: number): unknown; clear(id: unknown): void };
 export const CLEAR_WINDOW_MS = 8000;
-type ClearDeps = { landed(id: string): Session | undefined; commit(session: Session): Promise<unknown> | void; changed(pending: Session[], writing: Session[]): void };
-// What Clear holds: the rows it hides, those in its window (`pending`) and those whose delete is in flight (`writing`): the server still
-// hears those, so a quit before the write commits them (#244).
-type ClearState = { hidden: Set<string>; pending: Map<string, Session>; writing: Map<string, Session>; tell(): void };
+type ClearDeps = { landed(id: string): Session | undefined; commit(session: Session): Promise<unknown> | void; changed(pending: Session[]): void };
+// What Clear holds: the rows it hides, and those in its window (`pending`).
+type ClearState = { hidden: Set<string>; pending: Map<string, Session>; tell(): void };
 
 // The window closed: each session still landed goes through Delete, and one whose Delete failed comes back.
-function commitDue({ hidden, pending, writing, tell }: ClearState, deps: ClearDeps) {
+function commitDue({ hidden, pending, tell }: ClearState, deps: ClearDeps) {
   const due = [...pending.keys()].map((id) => ({ id, session: deps.landed(id) }));
   pending.clear();
-  for (const { id, session } of due) if (session) writing.set(id, session);
   tell();
   for (const { id, session } of due) {
     if (!session) hidden.delete(id);
+    // A row whose Delete failed comes back.
     else
-      void Promise.resolve(deps.commit(session)).then(
-        () => {
-          writing.delete(id);
-          tell();
-        },
-        // A row whose Delete failed comes back.
-        () => {
-          writing.delete(id);
-          hidden.delete(id);
-          tell();
-        },
-      );
+      void Promise.resolve(deps.commit(session)).catch(() => {
+        hidden.delete(id);
+        tell();
+      });
   }
 }
 
 export function clearing(time: Clock, deps: ClearDeps, hidden = new Set<string>()) {
-  const state: ClearState = { hidden, pending: new Map(), writing: new Map(), tell: () => deps.changed([...state.pending.values()], [...state.writing.values()]) };
-  const { pending, writing, tell } = state;
+  const state: ClearState = { hidden, pending: new Map(), tell: () => deps.changed([...state.pending.values()]) };
+  const { pending, tell } = state;
   let timer: unknown = null;
   const stop = () => {
     if (timer !== null) time.clear(timer);
@@ -274,7 +257,6 @@ export function clearing(time: Clock, deps: ClearDeps, hidden = new Set<string>(
         if (deps.landed(id)) continue;
         hidden.delete(id);
         dropped = pending.delete(id) || dropped;
-        dropped = writing.delete(id) || dropped;
       }
       if (!dropped) return;
       if (pending.size === 0) stop();

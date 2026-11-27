@@ -1149,7 +1149,7 @@ fn a_record_file_from_before_still_true_items_reads_with_its_verdicts() {
         let bench = bench();
         let head = bench.first_head();
         assert!(!before.contains("\"kind\""), "{case}");
-        // The project's folder in the store, as `micro_worlds::project_folder` names it: its path, readable, and its FNV-1a hash.
+        // The project's folder in the store, as `records::project_folder` names it: its path, readable, and its FNV-1a hash.
         let project = bench.project();
         let name: String = project
             .chars()

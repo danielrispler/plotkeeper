@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 
-use crate::common::{extractor_map, pairs, repo, report, run, write};
+use crate::common::{extractor_map, pairs, repo, report, run, sites, write};
 
 /// A map naming `php-imports` whose parts are `parts`, each an id with its paths, whose import links are `links`, and
 /// which ignores `ignored` besides its own file.
@@ -51,28 +51,6 @@ fn pairs_of(code: &str) -> Vec<String> {
 
 fn from_main(to: &[&str]) -> Vec<String> {
     to.iter().map(|t| format!("{MAIN}>{t}")).collect()
-}
-
-/// Each pair's import sites in `check --json`, as `from>to file:line`, sorted.
-fn sites(root: &str) -> Vec<String> {
-    let out = run(root, "check", &["--json"]);
-    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
-    let mut found = Vec::new();
-    for edge in value["edges"].as_array().into_iter().flatten() {
-        for pair in edge["pairs"].as_array().unwrap() {
-            for site in pair["sites"].as_array().unwrap() {
-                found.push(format!(
-                    "{}>{} {}:{}",
-                    pair["from"].as_str().unwrap(),
-                    pair["to"].as_str().unwrap(),
-                    site["file"].as_str().unwrap(),
-                    site["line"]
-                ));
-            }
-        }
-    }
-    found.sort();
-    found
 }
 
 // Class `use`.
@@ -374,7 +352,7 @@ fn a_class_uses_site_is_the_line_of_its_name() {
         ],
     );
     assert_eq!(
-        sites(&root),
+        sites(&root, &[]),
         [
             format!("{MAIN}>src/A.php {MAIN}:3"),
             format!("{MAIN}>src/A.php {MAIN}:6"),
@@ -903,7 +881,7 @@ fn a_requires_site_is_the_line_of_its_keyword() {
     files.extend(targets());
     let (_dir, root) = repo(&map(&[("b", &["**"]), ("a", &["a/"])], &[], &[]), &files);
     assert_eq!(
-        sites(&root),
+        sites(&root, &[]),
         [
             format!("{MAIN}>{X} {MAIN}:3"),
             format!("{MAIN}>{X} {MAIN}:7"),

@@ -1,53 +1,23 @@
 //! `python-imports`: Python repositories in temporary folders, read through `check` and `imports` (spec #589, "Testing
 //! Decisions").
 
-use std::{path::Path, process::Command};
-
 use serde_json::{Value, json};
 
-use crate::common::{has, project_text, write};
-
-/// A map naming `python-imports` whose parts are `parts`, each an id with its paths, and whose import links are `links`.
-fn map(parts: &[(&str, &[&str])], links: &[(&str, &str)]) -> Value {
-    json!({
-        "version": 2,
-        "extractors": ["python-imports"],
-        "parts": parts.iter().map(|(id, paths)| json!({
-            "id": id, "name": id, "caption": id, "purpose": "A part.", "holds": [], "tier": "core", "paths": paths
-        })).collect::<Vec<_>>(),
-        "actors": [],
-        "links": links.iter().map(|(from, to)| json!({
-            "id": format!("{from}-{to}"), "from": from, "to": to, "kind": "import"
-        })).collect::<Vec<_>>(),
-        "ignored": ["system-map.json"],
-        "laws": []
-    })
-}
-
-/// A repository holding `map` and `files` with their texts, committed.
-fn repo(map: &Value, files: &[(&str, &str)]) -> (tempfile::TempDir, String) {
-    let (dir, root) = project_text(&map.to_string(), &[]);
-    for (file, text) in files {
-        write(dir.path(), file, text);
-    }
-    studio_test_support::git(dir.path(), &["add", "-A"]);
-    studio_test_support::git(dir.path(), &["commit", "-q", "-m", "Code"]);
-    (dir, root)
-}
-
-fn report(root: &str) -> system_map::Report {
-    system_map::check(Path::new(root))
-}
+use crate::common::{
+    assert_only_candidate_links_relaxed, extractor_map, has, imports_json, pairs as edge_pairs,
+    repo, report, run, sites, write,
+};
 
 /// Every file pair of the computed edges, as `from>to`, sorted.
 fn pairs(report: &system_map::Report) -> Vec<String> {
-    let mut found: Vec<String> = report
-        .edges
-        .iter()
-        .flat_map(|e| e.pairs.iter().map(|p| format!("{}>{}", p.from, p.to)))
-        .collect();
+    let mut found = edge_pairs(report);
     found.sort();
     found
+}
+
+/// A map naming `python-imports` whose parts are `parts`, each an id with its paths, and whose import links are `links`.
+fn map(parts: &[(&str, &[&str])], links: &[(&str, &str)]) -> Value {
+    extractor_map("python-imports", parts, links, &[])
 }
 
 /// A map in which each `.py` file is a part of its own, so that every pair crosses parts, and the other files are one
@@ -80,15 +50,6 @@ fn each_file_a_part(files: &[(&str, &str)]) -> Value {
 fn py_pairs(files: &[(&str, &str)]) -> Vec<String> {
     let (_dir, root) = repo(&each_file_a_part(files), files);
     pairs(&report(&root))
-}
-
-fn run(root: &str, command: &str, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_system-map"))
-        .arg(command)
-        .args(args)
-        .args(["--root", root])
-        .output()
-        .unwrap()
 }
 
 const PYPROJECT: (&str, &str) = ("pyproject.toml", "[project]\nname = \"m\"\n");
@@ -574,18 +535,11 @@ fn a_relative_unsure_import_relaxes_only_the_links_to_its_candidates_parts() {
         &[("pk", "px"), ("pk", "zz")],
     );
     let (_dir, root) = repo(&map, &files);
-    let out = run(&root, "check", &[]);
-    assert_eq!(
-        String::from_utf8_lossy(&out.stderr),
-        "note: p/pkg/m.py is unsure of ..x; its links to px pass as unproven\n"
-    );
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(stdout.lines().count(), 1, "{stdout}");
-    assert!(
-        stdout.starts_with(
-            "import link \"pk-zz\" runs from \"pk\" to \"zz\", but the code shows no dependency"
-        ),
-        "{stdout}"
+    assert_only_candidate_links_relaxed(
+        &root,
+        "note: p/pkg/m.py is unsure of ..x; its links to px pass as unproven\n",
+        "pk",
+        "zz",
     );
 }
 
@@ -735,28 +689,6 @@ fn check_suggests_python_imports_only_for_a_repository_with_a_py_file_it_would_r
     }
 }
 
-/// Every import site of the computed edges, as `from>to file:line`.
-fn sites(root: &str) -> Vec<String> {
-    let out = run(root, "check", &["--json"]);
-    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
-    let mut found = Vec::new();
-    for edge in value["edges"].as_array().into_iter().flatten() {
-        for pair in edge["pairs"].as_array().unwrap() {
-            for site in pair["sites"].as_array().unwrap() {
-                found.push(format!(
-                    "{}>{} {}:{}",
-                    pair["from"].as_str().unwrap(),
-                    pair["to"].as_str().unwrap(),
-                    site["file"].as_str().unwrap(),
-                    site["line"]
-                ));
-            }
-        }
-    }
-    found.sort();
-    found
-}
-
 #[test]
 fn a_pair_keeps_the_line_of_each_import_statement_that_makes_it() {
     let files = [
@@ -770,7 +702,7 @@ fn a_pair_keeps_the_line_of_each_import_statement_that_makes_it() {
     ];
     let (_dir, root) = repo(&each_file_a_part(&files), &files);
     assert_eq!(
-        sites(&root),
+        sites(&root, &[]),
         [
             "app.py>a/__init__.py app.py:2",
             "app.py>a/__init__.py app.py:4",
@@ -788,7 +720,7 @@ fn a_pair_keeps_the_line_of_each_import_statement_that_makes_it() {
 fn imports_lib_at(text: &str) -> Vec<String> {
     let files = [("app.py", text), ("lib.py", "x = 1\n"), ("os.py", "")];
     let (_dir, root) = repo(&each_file_a_part(&files), &files);
-    sites(&root)
+    sites(&root, &[])
         .into_iter()
         .filter_map(|s| s.strip_prefix("app.py>lib.py app.py:").map(String::from))
         .collect()
@@ -870,11 +802,6 @@ fn text_that_is_not_valid_python_gives_no_problem_and_never_a_guessed_pair() {
             .all(|p| !p.ends_with(">os.py") && !p.starts_with("py2.py")),
         "{found:?}"
     );
-}
-
-fn imports_json(root: &str) -> Value {
-    let out = run(root, "imports", &["--json"]);
-    serde_json::from_slice(&out.stdout).unwrap()
 }
 
 /// `app/main.py` importing `a.b` twice, over a package `a/` whose `__init__.py` and `a/b/` sit in parts of their own.
@@ -1134,18 +1061,11 @@ fn an_unsure_import_relaxes_only_the_links_to_its_candidates_parts() {
         &[("app", "pp"), ("app", "zz")],
     );
     let (_dir, root) = repo(&map, &files);
-    let out = run(&root, "check", &[]);
-    assert_eq!(
-        String::from_utf8_lossy(&out.stderr),
-        "note: app/main.py is unsure of m.sub; its links to pp pass as unproven\n"
-    );
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(stdout.lines().count(), 1, "{stdout}");
-    assert!(
-        stdout.starts_with(
-            "import link \"app-zz\" runs from \"app\" to \"zz\", but the code shows no dependency"
-        ),
-        "{stdout}"
+    assert_only_candidate_links_relaxed(
+        &root,
+        "note: app/main.py is unsure of m.sub; its links to pp pass as unproven\n",
+        "app",
+        "zz",
     );
 }
 
@@ -1605,9 +1525,21 @@ fn a_setup_cfg_package_dir_and_find_where_give_roots() {
 }
 
 #[test]
-fn a_setup_cfg_reads_comments_and_blank_lines_as_configparser_does() {
-    let config = "# a comment\n[metadata]\nname = m\n\n[options]\n; another\npackage_dir =\n    # indented comment\n\n    = lib\n    ; more\n";
-    assert_eq!(cfg_pairs(config), ["app.py>lib/a/__init__.py"]);
+fn a_setup_cfgs_layout_is_read_as_configparser_does_and_only_from_its_options_section() {
+    for (what, config, expected) in [
+        (
+            "comments and blank lines",
+            "# a comment\n[metadata]\nname = m\n\n[options]\n; another\npackage_dir =\n    # indented comment\n\n    = lib\n    ; more\n",
+            "app.py>lib/a/__init__.py",
+        ),
+        (
+            "a key in another section",
+            "[tool:other]\npackage_dir = lib\nwhere = lib\n[options]\nname = m\n",
+            "app.py>src/b/__init__.py",
+        ),
+    ] {
+        assert_eq!(cfg_pairs(config), [expected], "{what}");
+    }
 }
 
 #[test]
@@ -1630,12 +1562,6 @@ fn a_setup_cfg_package_dir_line_with_a_name_registers_it_at_its_folder() {
         found,
         ["app.py>lib/__init__.py", "app.py>src/b/__init__.py"]
     );
-}
-
-#[test]
-fn a_setup_cfg_key_in_another_section_is_not_a_layout() {
-    let config = "[tool:other]\npackage_dir = lib\nwhere = lib\n[options]\nname = m\n";
-    assert_eq!(cfg_pairs(config), ["app.py>src/b/__init__.py"]);
 }
 
 #[test]

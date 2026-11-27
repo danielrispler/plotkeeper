@@ -88,58 +88,6 @@ pub fn bin_dir(home: &Path) -> PathBuf {
 /// The binaries the hooks run, which ship beside `plotkeeper` and are copied into [`bin_dir`].
 pub const HOOK_BINARIES: [&str; 2] = ["plotkeeper-hook", "plotkeeper-answer"];
 
-/// The folder the data lived in before it was named for plotkeeper (#322).
-const OLD_DATA_FOLDER: &str = "dev.falinks.studio";
-
-/// The one move (#322): when the old data folder exists as a real folder and the new one does not,
-/// renames it to the new name and leaves a symbolic link at the old path, so the plugin path in
-/// `~/.zshrc` (through the folder's `checkout` link) and a hook still built with the old path keep
-/// working. Never moves over an existing new folder. Returns whether it moved. macOS only: the old folder never
-/// existed on Linux, where this moves nothing.
-pub fn move_old_data_dir(home: &Path) -> std::io::Result<bool> {
-    if !cfg!(target_os = "macos") {
-        return Ok(false);
-    }
-    let (new, old) = (
-        data_dir(home),
-        home.join("Library/Application Support")
-            .join(OLD_DATA_FOLDER),
-    );
-    let is_dir = |p: &Path| fs::symlink_metadata(p).is_ok_and(|m| m.is_dir());
-    if !is_dir(&old) || fs::symlink_metadata(&new).is_ok() {
-        return Ok(false);
-    }
-    // A second process that moved first leaves a link at `old` and a folder at `new`; losing the
-    // race is not an error.
-    if fs::rename(&old, &new).is_err() {
-        return Ok(false);
-    }
-    leave_link(&old)?;
-    Ok(true)
-}
-
-/// The symbolic link at `old`, which now names the new folder. Something that took the old path after the rename
-/// (a hook still built with the old path makes its folder) leaves it, and is no failure: the data moved.
-fn leave_link(old: &Path) -> std::io::Result<()> {
-    match std::os::unix::fs::symlink(DATA_FOLDER, old) {
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
-        other => other,
-    }
-}
-
-#[cfg(test)]
-mod link_tests {
-    #[test]
-    fn a_path_taken_after_the_rename_is_no_failure_of_the_move() {
-        let home = std::env::temp_dir().join(format!("plotkeeper-link-{}", std::process::id()));
-        let old = home.join("old");
-        std::fs::create_dir_all(&old).unwrap();
-        let left = super::leave_link(&old);
-        std::fs::remove_dir_all(&home).unwrap();
-        assert!(left.is_ok(), "{left:?}");
-    }
-}
-
 /// The log in the studio's data directory. The hook writes it; the app reads it.
 pub fn event_log(home: &Path) -> PathBuf {
     data_dir(home).join(EVENT_LOG)
@@ -151,7 +99,7 @@ pub const EVENT_LOG: &str = "events.jsonl";
 /// How long the hook waits for the log's lock before it drops the event (#43, decision 11).
 pub const PATIENCE: Duration = Duration::from_secs(5);
 
-/// The drops file beside the log `log`: a line `<Unix ms> <event> <terminal>` for each event the
+/// The drops file beside the log `log`: a line `<Unix ms> <event>` for each event the
 /// hook dropped.
 pub fn drops_file(log: &Path) -> PathBuf {
     log.with_file_name("drops.txt")
@@ -392,13 +340,13 @@ fn lightened(line: &[u8]) -> Option<Vec<u8>> {
     Some(light)
 }
 
-/// Notes in the drops file beside `log` that the hook dropped `event` of `terminal` at `at`, in Unix
-/// milliseconds, with no lock and one small write.
-pub fn drop_event(log: &Path, at: u64, event: &str, terminal: &str) -> std::io::Result<()> {
+/// Notes in the drops file beside `log` that the hook dropped `event` at `at`, in Unix milliseconds,
+/// with no lock and one small write.
+pub fn drop_event(log: &Path, at: u64, event: &str) -> std::io::Result<()> {
     use std::io::Write;
     // The fields are space-separated, so none may hold whitespace.
     let plain = |text: &str| text.split_whitespace().collect::<Vec<_>>().join("_");
-    let line = format!("{at} {} {}\n", plain(event), plain(terminal));
+    let line = format!("{at} {}\n", plain(event));
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)

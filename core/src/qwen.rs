@@ -69,7 +69,6 @@ struct Raw {
     notification_type: String,
     #[serde(default)]
     studio_received_ms: u64,
-    studio_terminal_id: Option<String>,
     studio_pid: Option<u32>,
 }
 
@@ -78,16 +77,21 @@ pub(crate) fn parse(line: &str) -> Result<Event, serde_json::Error> {
     serde_json::from_str::<Raw>(line).map(adapt)
 }
 
-fn tool(raw: &Raw) -> Tool {
-    let name = raw.tool_name.clone().unwrap_or_default();
-    let input = &raw.tool_input;
-    let kind = match name.as_str() {
+/// What a call of tool `name` is.
+pub(crate) fn kind(name: &str) -> ToolKind {
+    match name {
         "write_file" | "edit" => ToolKind::Edit,
         "run_shell_command" => ToolKind::Command,
         // shortcut: the docs do not show how an MCP tool is named; Claude Code's prefix is assumed.
         _ if name.starts_with("mcp__") => ToolKind::External,
         _ => ToolKind::Other,
-    };
+    }
+}
+
+fn tool(raw: &Raw) -> Tool {
+    let name = raw.tool_name.clone().unwrap_or_default();
+    let input = &raw.tool_input;
+    let kind = kind(&name);
     Tool {
         path: (kind == ToolKind::Edit)
             .then(|| input["file_path"].as_str().map(Into::into))
@@ -120,9 +124,7 @@ fn adapt(raw: Raw) -> Event {
             origin: None,
         }),
         "Stop" => {
-            happened.push(Happened::TurnEnd {
-                background_pending: false,
-            });
+            happened.push(Happened::TurnEnd);
             happened.push(Happened::Reply(raw.last_assistant_message.clone()));
         }
         "PreToolUse" => happened.push(Happened::ToolStart {
@@ -160,7 +162,6 @@ fn adapt(raw: Raw) -> Event {
         transcript_path: raw.transcript_path,
         prompt_id: raw.prompt_id,
         studio_received_ms: raw.studio_received_ms,
-        studio_terminal_id: raw.studio_terminal_id,
         studio_pid: raw.studio_pid,
         studio_turn_start: Default::default(),
         studio_turn_end: Default::default(),

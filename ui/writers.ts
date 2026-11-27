@@ -12,7 +12,6 @@
 import { confirmed, drawWithStatus, failure, hint, invoke, messageOf, pressable, text } from "./dom.js";
 import type { Settings } from "./settings.js";
 import type { SettingsFiles, Writers, WriterKind, WriterTest } from "./types.js";
-import { GATE } from "./writer-notice.js";
 
 export type Choice = { writer: WriterKind; model: string; effort: string };
 
@@ -63,9 +62,6 @@ export function preset(list: Writers, now: Settings["summaries"]): Choice {
 /** A Test's outcome as the section shows it. */
 export const testLine = (test: WriterTest): { passed: boolean; text: string } =>
   test.outcome === "passed" ? { passed: true, text: test.line } : { passed: false, text: `Failed: ${test.line}` };
-
-/** The writer's notice line while summaries wait for a Test (`writer-notice.ts`). */
-export const gateNotice = (list: Writers): string | null => (list.summaries_on ? null : GATE);
 
 export const briefsLine = (list: Writers): string | null =>
   list.briefs ? null : "PR briefs need Claude: they are written by `claude`, which was not found, whatever writer is picked here. Install Claude Code and restart plotkeeper.";

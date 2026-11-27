@@ -528,12 +528,8 @@ impl CatchUpStore {
     /// Writes `catch_up`, through a temporary file so a crash leaves the old one.
     pub fn put(&self, catch_up: &StoredCatchUp) -> std::io::Result<()> {
         let path = self.path(&catch_up.part);
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(
-            &tmp,
-            serde_json::to_vec_pretty(catch_up).map_err(std::io::Error::other)?,
-        )?;
-        std::fs::rename(tmp, path)
+        let text = serde_json::to_vec_pretty(catch_up).map_err(std::io::Error::other)?;
+        studio_workbench::write_atomic(&path, &text)
     }
 
     pub fn record(&self, record: &BriefRecord) -> std::io::Result<()> {

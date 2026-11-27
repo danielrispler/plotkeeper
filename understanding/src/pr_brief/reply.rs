@@ -154,11 +154,15 @@ impl BriefWriter for ClaudeWriter {
 
 /// The brief in a writer's reply text (or in the whole `claude` envelope): the first `{` to the last `}`.
 pub fn parse_reply(text: &str) -> Result<Brief, String> {
+    object_in(text)
+}
+
+/// The `{ ... }` object in a reply's text (or in the whole `claude` envelope), read as a `T`, or why not: the PR brief's
+/// and its claim check's one reading of a reply.
+pub(crate) fn object_in<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, String> {
     let text = read_envelope(text)?.text;
-    let (a, b) = text
-        .find('{')
-        .zip(text.rfind('}'))
-        .filter(|(a, b)| a < b)
-        .ok_or("the reply holds no JSON object")?;
-    serde_json::from_str(&text[a..=b]).map_err(|e| format!("the reply's JSON does not read: {e}"))
+    crate::read_object(&text).map_err(|e| match e {
+        None => "the reply holds no JSON object".into(),
+        Some(e) => format!("the reply's JSON does not read: {e}"),
+    })
 }

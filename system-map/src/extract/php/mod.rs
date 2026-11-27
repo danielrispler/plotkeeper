@@ -115,15 +115,5 @@ fn clean(text: &str) -> Option<String> {
     let rest = text
         .strip_prefix('/')
         .or_else(|| text.is_empty().then_some(text))?;
-    let mut kept: Vec<&str> = Vec::new();
-    for segment in rest.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                kept.pop()?;
-            }
-            s => kept.push(s),
-        }
-    }
-    Some(kept.join("/"))
+    crate::extract::folders::join("", rest)
 }

@@ -1,12 +1,9 @@
-//! #322: the data folder moves once from `dev.falinks.studio` to `plotkeeper`, with a link at the old path, on macOS.
-//! #700: on Linux the data and runs folders follow XDG, and nothing moves.
+//! Where the data and runs folders are: on macOS under `Library/`, on Linux following XDG (#700).
+#[cfg(target_os = "linux")]
 use crate::common::{feed, hook, scratch};
-use std::{fs, path::Path};
-
-#[cfg(target_os = "macos")]
-fn support(home: &Path) -> std::path::PathBuf {
-    home.join("Library/Application Support")
-}
+#[cfg(target_os = "linux")]
+use std::fs;
+use std::path::Path;
 
 #[cfg(target_os = "macos")]
 #[test]
@@ -19,91 +16,6 @@ fn the_data_folder_is_plotkeeper() {
         studio_hook::event_log(Path::new("/h")),
         Path::new("/h/Library/Application Support/plotkeeper/events.jsonl")
     );
-}
-
-#[cfg(target_os = "macos")]
-#[test]
-fn the_move_renames_the_old_folder_and_leaves_a_link_once() {
-    let home = scratch("move-once");
-    let old = support(&home).join("dev.falinks.studio");
-    fs::create_dir_all(old.join("checkout")).unwrap();
-    fs::write(old.join("events.jsonl"), "a\n").unwrap();
-
-    assert!(studio_hook::move_old_data_dir(&home).unwrap());
-
-    let new = support(&home).join("plotkeeper");
-    assert_eq!(fs::read_to_string(new.join("events.jsonl")).unwrap(), "a\n");
-    assert!(fs::symlink_metadata(&old).unwrap().is_symlink());
-    assert_eq!(fs::read_to_string(old.join("events.jsonl")).unwrap(), "a\n");
-    assert!(old.join("checkout").is_dir());
-    // A second start moves nothing and leaves the link as it was.
-    assert!(!studio_hook::move_old_data_dir(&home).unwrap());
-    assert!(fs::symlink_metadata(&old).unwrap().is_symlink());
-}
-
-#[cfg(target_os = "macos")]
-#[test]
-fn the_move_never_goes_over_an_existing_new_folder() {
-    let home = scratch("move-over");
-    let old = support(&home).join("dev.falinks.studio");
-    let new = support(&home).join("plotkeeper");
-    fs::create_dir_all(&old).unwrap();
-    fs::create_dir_all(&new).unwrap();
-    fs::write(old.join("events.jsonl"), "old\n").unwrap();
-    fs::write(new.join("events.jsonl"), "new\n").unwrap();
-
-    assert!(!studio_hook::move_old_data_dir(&home).unwrap());
-
-    assert!(!fs::symlink_metadata(&old).unwrap().is_symlink());
-    assert_eq!(
-        fs::read_to_string(old.join("events.jsonl")).unwrap(),
-        "old\n"
-    );
-    assert_eq!(
-        fs::read_to_string(new.join("events.jsonl")).unwrap(),
-        "new\n"
-    );
-}
-
-#[cfg(target_os = "macos")]
-#[test]
-fn nothing_moves_without_an_old_folder() {
-    let home = scratch("move-none");
-    assert!(!studio_hook::move_old_data_dir(&home).unwrap());
-    assert!(!support(&home).join("dev.falinks.studio").exists());
-}
-
-#[cfg(target_os = "macos")]
-#[test]
-fn a_hook_built_with_the_old_path_still_appends_to_the_same_log() {
-    let home = scratch("old-hook");
-    let old = support(&home).join("dev.falinks.studio");
-    fs::create_dir_all(&old).unwrap();
-    studio_hook::move_old_data_dir(&home).unwrap();
-
-    // What a hook built before the change does: append to the log under the old path.
-    let event = serde_json::json!({ "hook_event_name": "Stop" });
-    assert!(studio_hook::append(&old.join("events.jsonl"), &event, studio_hook::PATIENCE).unwrap());
-
-    let log = fs::read_to_string(support(&home).join("plotkeeper/events.jsonl")).unwrap();
-    assert_eq!(log.lines().count(), 1);
-}
-
-#[cfg(target_os = "macos")]
-#[test]
-fn the_hook_moves_the_old_folder_before_it_writes() {
-    let home = scratch("hook-moves");
-    let old = support(&home).join("dev.falinks.studio");
-    fs::create_dir_all(&old).unwrap();
-    fs::write(old.join("events.jsonl"), "{\"before\":1}\n").unwrap();
-
-    let payload = serde_json::json!({ "hook_event_name": "Stop", "session_id": "s" });
-    assert!(feed(hook(&home), &payload).wait().unwrap().success());
-
-    let log = fs::read_to_string(support(&home).join("plotkeeper/events.jsonl")).unwrap();
-    assert_eq!(log.lines().count(), 2, "{log}");
-    assert!(log.starts_with("{\"before\":1}"));
-    assert!(fs::symlink_metadata(&old).unwrap().is_symlink());
 }
 
 #[cfg(target_os = "macos")]
@@ -227,16 +139,6 @@ fn on_linux_the_runs_folder_follows_xdg_cache_home() {
     );
 }
 
-#[cfg(target_os = "linux")]
-#[test]
-fn on_linux_the_old_folder_is_never_moved() {
-    let home = scratch("no-move");
-    let old = home.join("Library/Application Support/dev.falinks.studio");
-    fs::create_dir_all(&old).unwrap();
-    assert!(!studio_hook::move_old_data_dir(&home).unwrap());
-    assert!(!fs::symlink_metadata(&old).unwrap().is_symlink());
-}
-
 /// On Linux a hook run from its copy in a data folder's `bin/` writes to that data folder, whatever `XDG_DATA_HOME` its
 /// agent was started with, as an IDE started from the desktop has none while `plotkeeper` started from a terminal had
 /// one: the `plotkeeper` that copied it there reads that folder (#510, "Folders").
@@ -250,7 +152,7 @@ fn on_linux_a_hook_copy_writes_to_the_data_folder_it_sits_in() {
     fs::copy(env!("CARGO_BIN_EXE_plotkeeper-hook"), &copy).unwrap();
     for xdg_data_home in [None, Some(home.join("desktop-data"))] {
         let mut cmd = std::process::Command::new(&copy);
-        cmd.env("HOME", &home).env_remove("PLOTKEEPER_TERMINAL_ID");
+        cmd.env("HOME", &home);
         match &xdg_data_home {
             Some(dir) => cmd.env("XDG_DATA_HOME", dir),
             None => cmd.env_remove("XDG_DATA_HOME"),

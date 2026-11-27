@@ -15,7 +15,7 @@ const turn = (paths, ago = 0, open = false) => ({
 const worker = (id, extra = {}) => ({ id, parent: "session", kind: "worker", name: `worker ${id}`, status: "running", ...extra });
 // A session with the fields the live link reads.
 const session = (id, state, extra = {}) => /** @type {import("../../dist/types.js").Session} */ ({
-  id, state, name: `session ${id}`, cwd: "/w/p", project: "/w/p", shell: false, status_only: false, asker: null, agents: [], turns: [], last_step: null,
+  id, state, name: `session ${id}`, cwd: "/w/p", project: "/w/p", asker: null, agents: [], turns: [], last_step: null,
   capabilities: { turn_trees: true }, identity: { name: `identity ${id}` }, unseen: false, ...extra,
 });
 
@@ -61,14 +61,14 @@ test("a Running session's in-flight edit is on its latest turn before the turn's
   assert.deepEqual(footprint({ ...s, state: "needs_you" }, placed, now), { firm: [], faint: ["server"] });
 });
 
-test("Running and Needs you sessions are marked, and Your turn or Idle ones while unseen; shells, Ended and other projects' never", () => {
+test("Running and Needs you sessions are marked, and Your turn or Idle ones while unseen; Ended and other projects' never", () => {
   const here = (project) => project === "/w/p";
   /** @type {[import("../../dist/types.js").Session, boolean][]} */
   const cases = [
     [session("r", "running"), true], [session("n", "needs_you"), true],
     [session("y", "your_turn"), false], [session("yu", "your_turn", { unseen: true }), true],
     [session("i", "idle"), false], [session("iu", "idle", { unseen: true }), true],
-    [session("e", "ended", { unseen: true }), false], [session("sh", "running", { shell: true }), false],
+    [session("e", "ended", { unseen: true }), false],
     [session("away", "running", { project: "/elsewhere" }), false],
     // Its project, not its folder, decides (spec #659).
     [session("moved", "running", { cwd: "/elsewhere/ui" }), true], [session("visiting", "running", { cwd: "/w/p", project: "/elsewhere" }), false],
@@ -169,7 +169,7 @@ test("a badge counts the session's own files and its running Workers', never a f
   assert.deepEqual(footprint(s, placed, now).firm.sort(), ["core", "server", "window"]);
 });
 
-test("Running, Needs you and Unseen sessions are counted; a seen Your turn or Idle, a shell, an Ended and another project's are not", () => {
+test("Running, Needs you and Unseen sessions are counted; a seen Your turn or Idle, an Ended and another project's are not", () => {
   const on = () => turn(["core/x.rs"]);
   const sessions = [
     session("run", "running", { turns: [on()] }),
@@ -178,7 +178,6 @@ test("Running, Needs you and Unseen sessions are counted; a seen Your turn or Id
     session("rest", "idle", { unseen: true, turns: [on()] }),
     session("seen", "your_turn", { turns: [on()] }),
     session("calm", "idle", { turns: [on()] }),
-    session("shell", "running", { shell: true, turns: [on()] }),
     session("done", "ended", { unseen: true, turns: [on()] }),
     session("away", "running", { cwd: "/w/p", project: "/elsewhere", turns: [on()] }),
   ];
@@ -201,7 +200,7 @@ test("the not placed rows are the marked sessions, Unseen included, whose latest
     session("none", "running", { turns: [turn([])] }),
     session("stray", "needs_you", { agents: [worker("w1")], turns: [turn(["stray.txt", ["docs/a.md", "w1"]])] }),
     session("unseen", "idle", { unseen: true, turns: [turn(["docs/a.md"])] }),
-    session("codex", "running", { status_only: true, capabilities: { turn_trees: false } }),
+    session("codex", "running", { capabilities: { turn_trees: false } }),
     // An earlier turn's part does not place the session.
     session("before", "your_turn", { unseen: true, turns: [turn(["core/x.rs"], day), turn([])] }),
     session("placed", "running", { turns: [turn(["core/x.rs"])] }),

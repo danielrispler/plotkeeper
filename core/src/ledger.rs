@@ -4,7 +4,7 @@
 //! are read on demand, by one seek and one read of the event's length (`Row::details`), so a read
 //! costs the same on a large log as on a small one.
 
-use crate::event::{Event, Tool};
+use crate::event::{Event, Tool, ToolKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -48,6 +48,8 @@ pub struct Row {
     /// The call's id (`tool_use_id`), unique among the rows of its agent.
     pub call: String,
     pub tool: String,
+    /// What its adapter takes the call for (#723).
+    pub(crate) kind: ToolKind,
     /// The file it works on, as its input names it.
     pub file: Option<String>,
     pub command: Option<String>,
@@ -148,6 +150,11 @@ impl Row {
         }
     }
 
+    /// Whether the call changes the file its input names.
+    pub(crate) fn edits(&self) -> bool {
+        self.kind == ToolKind::Edit
+    }
+
     /// Whether it ended in failure.
     pub fn failed(&self) -> bool {
         matches!(self.outcome, Some(Outcome::Failed { .. }))
@@ -228,6 +235,7 @@ impl Ledger {
                 self.rows.push(Row {
                     call: call.into(),
                     tool: tool.name.clone(),
+                    kind: tool.kind.clone(),
                     file: ["file_path", "notebook_path", "path"]
                         .iter()
                         .find_map(|k| text(k))

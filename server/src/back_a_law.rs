@@ -21,6 +21,7 @@
 
 use crate::{
     ci_laws,
+    records::Notice,
     runner::{End, Ended, Kind, Limits, Request, Runner, private_tmp},
 };
 use serde::{Deserialize, Serialize};
@@ -30,7 +31,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
-    sync::{Arc, Mutex, OnceLock, Weak},
+    sync::{Arc, Mutex, Weak},
     thread,
     time::{Duration, Instant},
 };
@@ -355,15 +356,13 @@ enum Target {
     New(NewLaw),
 }
 
-type Changed = Box<dyn Fn(&str) + Send + Sync>;
-
 /// The back a law runs of every project: starting them, proving what they leave, and the patches kept.
 pub struct LawRuns {
     runner: Arc<Runner>,
     config: Config,
     /// The rejected patches, by run id; the ones being proven and the proven ones are on disk.
     shown: Mutex<BTreeMap<String, LawPatch>>,
-    changed: OnceLock<Changed>,
+    changed: Notice,
     /// Serialises Open draft PR, so a second click waits and finds the PR the first opened.
     opening: Mutex<()>,
 }
@@ -375,7 +374,7 @@ impl LawRuns {
             runner: runner.clone(),
             config,
             shown: Mutex::default(),
-            changed: OnceLock::new(),
+            changed: Notice::default(),
             opening: Mutex::default(),
         });
         laws.stopped_proofs();
@@ -423,14 +422,11 @@ impl LawRuns {
 
     /// Sets what is told the project whose patches changed; the first call wins.
     pub fn on_change(&self, changed: impl Fn(&str) + Send + Sync + 'static) {
-        // Set once; a later set keeps the first value, which is the same.
-        self.changed.set(Box::new(changed)).ok();
+        self.changed.set(changed);
     }
 
     fn tell(&self, project: &str) {
-        if let Some(changed) = self.changed.get() {
-            changed(project);
-        }
+        self.changed.tell(project);
     }
 
     fn shown(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, LawPatch>> {

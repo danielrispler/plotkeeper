@@ -20,14 +20,14 @@
 //!   ([`Record::with_kinds`]).
 
 use crate::ratify::{Detail, MapItem};
+use crate::records::Records;
 use crate::runner::{End, Kind, Limits, Outcome, Request, Runner};
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
 use std::{
-    collections::{BTreeMap, HashSet},
-    fs,
+    collections::BTreeMap,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak},
+    sync::{Arc, Mutex, MutexGuard, PoisonError, Weak},
     thread,
     time::Duration,
 };
@@ -368,9 +368,9 @@ fn text_of(change: &MapItem) -> Vec<ReviewItem> {
     items
 }
 
-/// FNV-1a of `text`, in hex (`micro_worlds::fnv1a`).
+/// FNV-1a of `text`, in hex (`records::fnv1a`).
 fn hash(text: &str) -> String {
-    format!("{:016x}", crate::micro_worlds::fnv1a(text))
+    format!("{:016x}", crate::records::fnv1a(text))
 }
 
 /// Where a head's review stands.
@@ -608,17 +608,13 @@ fn read_answer(result: &str, asked: &[ReviewItem]) -> Vec<Verdict> {
         .collect()
 }
 
-type Changed = Box<dyn Fn(&str) + Send + Sync>;
-
 /// Every project's map text reviews: their runs and their verdicts.
 pub struct MapReviews {
     config: Config,
     runner: Weak<Runner>,
-    changed: OnceLock<Changed>,
-    /// The runs whose answer is being read, so an answer is read once.
-    reading: Mutex<HashSet<String>>,
-    /// Serialises the read, change and write of a PR's file.
-    writing: Mutex<()>,
+    /// A file per PR; its in-flight set holds the runs whose answer is being read, so an answer is read once, and its lock
+    /// serialises the read, change and write of a PR's file.
+    store: Records<Record>,
     /// Each PR's head as the latest lookup saw it ([`MapReviews::head_now`]), by project and number, with that lookup's order:
     /// only that head's review may start or cancel another's.
     current: Mutex<BTreeMap<(String, u64), (u64, String)>>,
@@ -629,11 +625,9 @@ impl MapReviews {
     /// The reviews kept in `config.store`, run by `runner`'s runs.
     pub fn new(config: Config, runner: &Arc<Runner>) -> Arc<MapReviews> {
         Arc::new_cyclic(|me| MapReviews {
+            store: Records::new(config.store.clone()),
             config,
             runner: Arc::downgrade(runner),
-            changed: OnceLock::new(),
-            reading: Mutex::default(),
-            writing: Mutex::default(),
             current: Mutex::default(),
             me: me.clone(),
         })
@@ -641,27 +635,24 @@ impl MapReviews {
 
     /// Sets what is told the project whose reviews changed; the first call wins.
     pub fn on_change(&self, changed: impl Fn(&str) + Send + Sync + 'static) {
-        // Set once; a later set keeps the first value, which is the same.
-        self.changed.set(Box::new(changed)).ok();
+        self.store.on_change(changed);
     }
 
     fn tell(&self, project: &str) {
-        if let Some(changed) = self.changed.get() {
-            changed(project);
-        }
+        self.store.tell(project);
     }
 
     fn lock(&self) -> MutexGuard<'_, ()> {
-        self.writing.lock().unwrap_or_else(PoisonError::into_inner)
+        self.store.lock()
     }
 
     fn file(&self, project: &str, pr: u64) -> PathBuf {
-        crate::micro_worlds::project_folder(&self.config.store, project).join(format!("{pr}.json"))
+        self.store.file(project, &pr.to_string())
     }
 
     fn read(&self, project: &str, pr: u64) -> Record {
-        let read = fs::read(self.file(project, pr)).ok();
-        read.and_then(|text| serde_json::from_slice(&text).ok())
+        self.store
+            .read(project, &pr.to_string())
             .map(Record::with_kinds)
             .unwrap_or_else(|| Record {
                 project: project.into(),
@@ -671,28 +662,12 @@ impl MapReviews {
     }
 
     fn write(&self, record: &Record) {
-        let file = self.file(&record.project, record.pr);
-        let dir = file.parent().unwrap_or(Path::new("")).to_path_buf();
-        let saved = fs::create_dir_all(&dir).and_then(|()| {
-            let mut temp = tempfile::NamedTempFile::new_in(&dir)?;
-            serde_json::to_writer(&mut temp, record)?;
-            temp.persist(&file)?;
-            Ok(())
-        });
+        let saved = self
+            .store
+            .write(&record.project, &record.pr.to_string(), record);
         if let Err(e) = saved {
             log::error!("save the map text review of PR #{}: {e}", record.pr);
         }
-    }
-
-    /// Every PR file of `project`'s.
-    fn records(&self, project: &str) -> Vec<Record> {
-        let folder = crate::micro_worlds::project_folder(&self.config.store, project);
-        let files = fs::read_dir(folder).into_iter().flatten().flatten();
-        files
-            .map(|entry| entry.path())
-            .filter(|path| path.extension().is_some_and(|e| e == "json"))
-            .filter_map(|path| serde_json::from_slice(&fs::read(path).ok()?).ok())
-            .collect()
     }
 
     /// Whether `head` is PR `pr`'s head as the lookups last saw it; a PR no lookup has seen yet takes the head it is given.
@@ -960,17 +935,17 @@ impl MapReviews {
         let Some(runner) = self.runner.upgrade() else {
             return;
         };
-        for record in self.records(project) {
+        for record in self.store.records(project) {
             for (head, kept) in &record.heads {
                 let (ReviewState::Reviewing, Some(id)) = (kept.state, kept.run.clone()) else {
                     continue;
                 };
-                if self.reading.lock().unwrap().contains(&id) {
+                if self.store.claimed(&id) {
                     continue;
                 }
                 match runner.outcome(&id) {
                     Some(outcome) => {
-                        if !self.reading.lock().unwrap().insert(id.clone()) {
+                        if !self.store.claim(&id) {
                             continue;
                         }
                         let (me, project, pr, head) = (
@@ -1014,7 +989,7 @@ impl MapReviews {
     fn ended(&self, project: &str, pr: u64, head: &str, id: &str, outcome: &Outcome) {
         let again = self.finish(project, pr, head, id, outcome);
         self.cancel_runs(pr, vec![id.to_string()]);
-        self.reading.lock().unwrap().remove(id);
+        self.store.release(id);
         if let Some(missing) = again {
             let submitted = self.submit(project, pr, head, &missing);
             self.started(project, pr, head, submitted);
@@ -1099,40 +1074,23 @@ impl MapReviews {
     /// At a start: each review whose run ended meanwhile has its answer read, one whose run is gone failed, and one whose run
     /// plotkeeper stopped before submitting failed too.
     pub fn pick_up(&self) {
-        let folders = fs::read_dir(&self.config.store)
-            .into_iter()
-            .flatten()
-            .flatten();
         let mut projects = std::collections::BTreeSet::new();
-        for folder in folders
-            .map(|entry| entry.path())
-            .filter(|path| path.is_dir())
-        {
-            let files = fs::read_dir(&folder).into_iter().flatten().flatten();
-            for file in files.map(|entry| entry.path()) {
-                let Some(mut record) = fs::read(&file)
-                    .ok()
-                    .and_then(|text| serde_json::from_slice::<Record>(&text).ok())
-                else {
-                    continue;
-                };
-                let reviewing = |head: &Head| head.state == ReviewState::Reviewing;
-                let mut unsubmitted = false;
-                for head in record.heads.values_mut() {
-                    if reviewing(head) && head.run.is_none() {
-                        head.state = ReviewState::Failed;
-                        head.why =
-                            Some("plotkeeper stopped before the review's run started".into());
-                        unsubmitted = true;
-                    }
+        for mut record in self.store.every() {
+            let reviewing = |head: &Head| head.state == ReviewState::Reviewing;
+            let mut unsubmitted = false;
+            for head in record.heads.values_mut() {
+                if reviewing(head) && head.run.is_none() {
+                    head.state = ReviewState::Failed;
+                    head.why = Some("plotkeeper stopped before the review's run started".into());
+                    unsubmitted = true;
                 }
-                if unsubmitted {
-                    let _guard = self.lock();
-                    self.write(&record);
-                }
-                if record.heads.values().any(reviewing) {
-                    projects.insert(record.project);
-                }
+            }
+            if unsubmitted {
+                let _guard = self.lock();
+                self.write(&record);
+            }
+            if record.heads.values().any(reviewing) {
+                projects.insert(record.project);
             }
         }
         projects

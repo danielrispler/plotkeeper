@@ -157,7 +157,7 @@ export type TurnFile = { root: string; path: string; from: string | null; added:
 type TurnFiles = { files: TurnFile[]; merged: number };
 /**
  * What the session's agent adapter reports, which decides what its view shows (danielrispler/plotkeeper#43, decision 4);
- * `agent` is its mark's name, empty for a status-only row.
+ * `agent` is its mark's name.
  */
 export type Capabilities = {
   agent: string;
@@ -187,13 +187,6 @@ export type Session = {
   // Its project folder (spec #659): the root of the first folder it got (git's top level, else that folder), a task's worktree's
   // main checkout, set once. The list groups by it, and the map, History and the selection read it.
   project: string;
-  // The studio terminal it runs in, its `PLOTKEEPER_TERMINAL_ID`; null when it runs outside the studio.
-  terminal: string | null;
-  // Another agent than Claude Code, from its terminal's OSC 7501 status only (danielrispler/Falinks#560): no intention,
-  // card, brief, estimate or decisions. Its id is its terminal's.
-  status_only: boolean;
-  // A status-only row of a plain terminal New terminal started, while no agent in it reports a status.
-  shell: boolean;
   // Daniel's name for it from the studio (danielrispler/Falinks#469); null for its folder's.
   name: string | null;
   // A few words on what it is about, written from Daniel's first prompt; null before it arrives.
@@ -202,12 +195,8 @@ export type Session = {
   resume_id: string;
   // Claude Code's permission mode from its latest event that names one, null before (danielrispler/Falinks#541).
   permission_mode: string | null;
-  // The mode it started in, from its first event that names one, which a resume keeps (danielrispler/Falinks#541).
-  started_mode: string | null;
   // When each `/clear` continued the row, in Unix ms: its "cleared" markers.
   cleared: number[];
-  // Closing its terminal asks first: it is in a turn or has background tasks (danielrispler/Falinks#469).
-  asks_before_closing: boolean;
   // Its task has landed (the core's rule): shown as a check mark once the session is at your turn, idle or ended.
   landed: boolean;
   last_step: Step | null;

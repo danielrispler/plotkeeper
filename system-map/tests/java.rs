@@ -3,7 +3,10 @@
 
 use serde_json::{Value, json};
 
-use crate::common::{extractor_map, has, pairs, repo, report, run, write};
+use crate::common::{
+    assert_only_candidate_links_relaxed, assert_unsure_file_listed_and_link_unproven,
+    extractor_map, has, imports_json, pairs, repo, report, run, sites, write,
+};
 
 /// A map naming `java-imports` whose parts are `parts`, each an id with its paths, whose import links are `links`, and
 /// which ignores `ignored` besides its own file.
@@ -16,33 +19,6 @@ fn map(parts: &[(&str, &[&str])], links: &[(&str, &str)], ignored: &[&str]) -> V
 fn java_pairs(files: &[(&str, &str)]) -> Vec<String> {
     let (_dir, root) = repo(&map(&[("b", &["**"]), ("a", &["a/"])], &[], &[]), files);
     pairs(&report(&root))
-}
-
-/// Each file pair's import sites in `check --json`, as `from>to file:line`, sorted.
-fn sites(root: &str) -> Vec<String> {
-    let out = run(root, "check", &["--json"]);
-    let value: Value = serde_json::from_slice(&out.stdout).unwrap();
-    let mut found = Vec::new();
-    for edge in value["edges"].as_array().into_iter().flatten() {
-        for pair in edge["pairs"].as_array().unwrap() {
-            for site in pair["sites"].as_array().unwrap() {
-                found.push(format!(
-                    "{}>{} {}:{}",
-                    pair["from"].as_str().unwrap(),
-                    pair["to"].as_str().unwrap(),
-                    site["file"].as_str().unwrap(),
-                    site["line"]
-                ));
-            }
-        }
-    }
-    found.sort();
-    found
-}
-
-fn imports_json(root: &str) -> Value {
-    let out = run(root, "imports", &["--json"]);
-    serde_json::from_slice(&out.stdout).unwrap()
 }
 
 /// The importing file of most tests: part `a`, package `app`, with `imports` from line 3, one per line.
@@ -263,7 +239,7 @@ fn static_imports_and_a_type_wildcard_pair_exactly_with_their_types_file() {
         ],
     );
     assert_eq!(
-        sites(&root),
+        sites(&root, &[]),
         [
             format!("{MAIN}>lib/src/main/java/lib/Other.java {MAIN}:5"),
             format!("{MAIN}>lib/src/main/java/lib/Util.java {MAIN}:3"),
@@ -368,7 +344,7 @@ fn import_like_and_class_like_text_in_comments_and_literals_gives_no_pair_and_no
         ],
     );
     assert_eq!(
-        sites(&root),
+        sites(&root, &[]),
         [
             format!("{MAIN}>lib/src/main/java/lib/Mixed.java {MAIN}:3"),
             format!("{MAIN}>lib/src/main/java/lib/Mixed.java {MAIN}:4"),
@@ -414,7 +390,7 @@ fn the_header_reads_annotations_a_package_line_imports_and_stray_semicolons_up_t
     );
     let from = "a/src/main/java/app/Header.java";
     assert_eq!(
-        sites(&root),
+        sites(&root, &[]),
         [
             format!("{from}>lib/src/main/java/lib/A.java {from}:5"),
             format!("{from}>lib/src/main/java/lib/B.java {from}:6"),
@@ -463,7 +439,7 @@ fn import_sites_count_lines_on_the_raw_text_whichever_line_terminator_it_uses() 
     );
     let util = "lib/src/main/java/lib/Util.java";
     assert_eq!(
-        sites(&root),
+        sites(&root, &[]),
         [
             format!("a/src/main/java/app/Cr.java>{util} a/src/main/java/app/Cr.java:3"),
             format!("a/src/main/java/app/Crlf.java>{util} a/src/main/java/app/Crlf.java:4"),
@@ -507,7 +483,7 @@ fn a_translated_line_break_ends_a_comment_and_the_import_site_stays_on_the_raw_l
         ],
     );
     assert_eq!(
-        sites(&root),
+        sites(&root, &[]),
         [
             format!("{MAIN}>{LIB_OTHER} {MAIN}:4"),
             format!("{MAIN}>{LIB_UTIL} {MAIN}:3"),
@@ -531,7 +507,7 @@ fn a_backslash_after_an_odd_number_of_backslashes_is_no_escape_and_a_translated_
             (&util_and_other()[1].0, &util_and_other()[1].1),
         ],
     );
-    assert_eq!(sites(&root), [format!("{MAIN}>{LIB_OTHER} {MAIN}:4")]);
+    assert_eq!(sites(&root, &[]), [format!("{MAIN}>{LIB_OTHER} {MAIN}:4")]);
 }
 
 #[test]
@@ -887,19 +863,12 @@ fn a_doubled_name_makes_the_importer_unsure_and_relaxes_only_the_links_to_its_ca
         &["import x.Util.Inner;", "import c.Thing;"],
         &[("app", "xa"), ("app", "xb"), ("app", "c"), ("app", "d")],
     );
-    let out = run(&root, "check", &[]);
-    assert_eq!(
-        String::from_utf8_lossy(&out.stderr),
-        format!("note: {MAIN_APP} is unsure of x.Util; its links to xa, xb pass as unproven\n")
-    );
     // The link to `d` still fails; `xa` and `xb` pass as unproven, and `c` is proven by its pair.
-    let problems = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(problems.lines().count(), 1, "{problems}");
-    assert!(
-        problems.starts_with(
-            "import link \"app-d\" runs from \"app\" to \"d\", but the code shows no dependency"
-        ),
-        "{problems}"
+    assert_only_candidate_links_relaxed(
+        &root,
+        &format!("note: {MAIN_APP} is unsure of x.Util; its links to xa, xb pass as unproven\n"),
+        "app",
+        "d",
     );
     let out = run(&root, "check", &["--json"]);
     let value: Value = serde_json::from_slice(&out.stdout).unwrap();
@@ -939,11 +908,9 @@ fn a_wildcard_over_a_package_with_one_doubled_name_pairs_with_the_rest_and_is_un
 }
 
 #[test]
-fn imports_json_lists_the_unsure_files() {
+fn imports_json_lists_the_unsure_files_and_the_pass_line_counts_the_relaxed_link_unproven() {
     let (_dir, root) = doubled(&["import x.Util;"], &[("app", "xa")]);
-    let value = imports_json(&root);
-    assert_eq!(value["unsure"][0]["file"], MAIN_APP);
-    assert_eq!(value["unsure"][0]["reason"], "declared twice");
+    assert_unsure_file_listed_and_link_unproven(&root, MAIN_APP);
 }
 
 #[test]

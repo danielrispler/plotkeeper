@@ -1,7 +1,7 @@
 //! The read loop (danielrispler/plotkeeper#324, spec #319 "The server"): it reads the event log from its start, then from where
 //! it stopped, and sends what changed to the [`Sink`](crate::Sink) the shell set: the session list, the selection, the cards, the
 //! notices (a `notification` event). It holds no window: whether Daniel is looking comes from the sink's `focused`, and what he last said
-//! the page shows (`rail_shown`, `split_shown`) from the [`App`].
+//! the page shows (`rail_shown`) from the [`App`].
 
 use crate::{
     App, CardsKey, PROCESS_CHECK, append_to, cards, current_cards_key, process_ends,
@@ -93,59 +93,6 @@ fn turn_files(state: &Mutex<studio_core::Studio>) -> bool {
         state.lock().unwrap().store_turn_files(ask, found);
     }
     !asks.is_empty()
-}
-
-/// The daemon's `list` (danielrispler/Falinks#560): the core's status-only rows and mismatch lines follow its terminals'
-/// OSC 7501 status. A row's notices go out as a Claude session's do.
-pub fn listed(app: &App, terms: Vec<studio_core::Terminal>) {
-    let outputs = app.core().terminals(&terms, millis());
-    for output in outputs {
-        match output {
-            Output::NeedsYou { session_id, agent } => {
-                tell(app, Notice::NeedsYou, &session_id, agent.as_deref());
-            }
-            Output::YourTurn { session_id } => tell(app, Notice::YourTurn, &session_id, None),
-            Output::Mismatch { line } => mismatch(&line),
-            Output::Interrupted {
-                session_id,
-                prompt_id,
-            } => {
-                thread::spawn(move || interrupted(&session_id, &prompt_id));
-            }
-            _ => {}
-        }
-    }
-    app.list_changed();
-}
-
-/// Daniel interrupted turn `prompt_id` of session `session_id`, which fires no `Stop`: a
-/// `StudioInterrupted` line in the event log, with the turn's end trees as the hook records them,
-/// which the log thread then applies and a restart replays.
-fn interrupted(session_id: &str, prompt_id: &str) {
-    let mut line = serde_json::Map::new();
-    line.insert("session_id".into(), session_id.into());
-    line.insert("hook_event_name".into(), studio_core::INTERRUPTED.into());
-    line.insert("prompt_id".into(), prompt_id.into());
-    line.insert("studio_received_ms".into(), millis().into());
-    let appended = std::env::home_dir()
-        .ok_or("no home directory".to_owned())
-        .and_then(|home| {
-            let log = studio_hook::event_log(&home);
-            let data = log.parent().ok_or("no data directory")?;
-            // The line goes in the log even when the trees cannot be recorded, as the hook's does.
-            if let Err(e) = studio_hook::trees(&mut line, data) {
-                log::warn!("record the trees of {session_id}'s interrupted turn: {e}");
-            }
-            crate::append(&[line.into()])
-        });
-    if let Err(e) = appended {
-        log::error!("end {session_id}'s interrupted turn: {e}");
-    }
-}
-
-/// Logs `line` at `info` under the `mismatch` target, for debugging (danielrispler/Falinks#560).
-fn mismatch(line: &str) {
-    log::info!(target: "mismatch", "{line}");
 }
 
 /// The part of Turn writing that needs the whole [`App`]: the writer's threads call it, and it reaches the state once
@@ -391,8 +338,8 @@ impl Follower {
         thread::spawn(move || save_state(&log, &replayed));
         app.core().tick(millis());
         self.sent.list(app);
-        // The terminals' revival waits only for the replay, not for this pass's `git` work, which
-        // can take a minute on a long log, while a click's pane waits on it (#182).
+        // The sink hears the replay is done before this pass's `git` work, which can take a minute
+        // on a long log (#182).
         app.events.replayed();
         // The first lookup of the PRs, which writes the briefs of the ready ones the start picks (`pr_briefs::Startup`).
         crate::prs::ask_later(&shared, crate::prs::Trigger::TurnEnd, None);
@@ -448,13 +395,6 @@ impl Follower {
                 "unrecognised wake-up: a prompt of session {session_id} names \
                  task {task_id} in markup the studio does not know"
             ),
-            Output::Mismatch { line } => mismatch(&line),
-            Output::Interrupted {
-                session_id,
-                prompt_id,
-            } => {
-                thread::spawn(move || interrupted(&session_id, &prompt_id));
-            }
             Output::AgyVersion => match agy_version() {
                 Some(version) => {
                     match self
@@ -520,17 +460,9 @@ fn notify(app: &App) {
         studio.session(id).is_some_and(|s| s.state == NeedsYou)
     };
     let due = app.notices().due(uptime(), focused, needs_you, || {
-        // The split's pane shows a terminal: a status-only row's id, or a session's in it.
-        let split = app.split_shown().clone();
         let studio = app.core();
         let selected = studio.selected().map(|s| s.agent.id.clone());
-        let mut on_screen: Vec<String> = selected.into_iter().collect();
-        if let Some(terminal) = split {
-            let in_it = studio.sessions().into_iter();
-            let in_it = in_it.filter(|s| s.terminal.as_ref() == Some(&terminal));
-            on_screen.extend(in_it.map(|s| s.agent.id.clone()));
-            on_screen.push(terminal);
-        }
+        let on_screen: Vec<String> = selected.into_iter().collect();
         drop(studio);
         on_screen
     });

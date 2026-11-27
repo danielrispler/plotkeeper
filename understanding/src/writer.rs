@@ -212,7 +212,7 @@ pub fn found_writers(shell: &Path) -> Vec<FoundWriter> {
 pub struct WriterRequest {
     pub system: Option<String>,
     pub user: String,
-    /// A JSON schema the reply's object must fit; a writer that cannot take one is read with `parse_object` instead.
+    /// A JSON schema the reply's object must fit; a writer that cannot take one is read with `read_object` instead.
     pub schema: Option<Value>,
     pub model: Option<String>,
     /// Empty or `None` leaves the model's default.
@@ -528,10 +528,10 @@ pub fn read_reply(
     let head: String = stdout.trim().chars().take(300).collect();
     let fail = |kind_of, detail: &str| Err(WriterError::new(kind_of, kind, detail));
     let envelope = match kind {
-        WriterKind::Agy => Some(crate::parse_object(stdout).unwrap_or(Value::Null)),
-        WriterKind::Claude if schema => Some(crate::parse_object(stdout).unwrap_or(Value::Null)),
+        WriterKind::Agy => Some(crate::read_object(stdout).unwrap_or(Value::Null)),
+        WriterKind::Claude if schema => Some(crate::read_object(stdout).unwrap_or(Value::Null)),
         // Cursor's one object, as Claude's; none when it failed, which it says on standard error.
-        WriterKind::Cursor => Some(crate::parse_object(stdout).unwrap_or(Value::Null)),
+        WriterKind::Cursor => Some(crate::read_object(stdout).unwrap_or(Value::Null)),
         WriterKind::Claude | WriterKind::Codex | WriterKind::Copilot => None,
         WriterKind::Anthropic | WriterKind::OpenAI => {
             unreachable!("an HTTP writer's reply is read by `http_writer`")
@@ -713,7 +713,7 @@ pub(crate) fn finish(
         return Err(WriterError::new(FailureKind::Empty, kind, ""));
     }
     Ok(WriterReply {
-        json: json.or_else(|| schema.then(|| crate::parse_object(&text).ok()).flatten()),
+        json: json.or_else(|| schema.then(|| crate::read_object(&text).ok()).flatten()),
         usage,
         text,
     })

@@ -85,10 +85,6 @@ impl AskFacts {
     }
 }
 
-fn edits(row: &Row) -> bool {
-    crate::turn_files::edits(&row.tool)
-}
-
 /// Whether `row` works on `path` of worktree `root`.
 fn on_file(row: &Row, root: &str, path: &str) -> bool {
     row.file
@@ -126,7 +122,7 @@ impl Studio {
                 text: describe(row),
             };
             let on = |text: &Option<String>| text.as_deref().is_some_and(has);
-            if edits(row) && on(&row.file) {
+            if row.edits() && on(&row.file) {
                 changed.push(fact);
             } else if row.tool == "Read" && on(&row.file) {
                 read.push(fact);
@@ -199,7 +195,7 @@ impl Studio {
                 let edited: Vec<&Row> = rows
                     .iter()
                     .copied()
-                    .filter(|r| edits(r) && on_file(r, root, path))
+                    .filter(|r| r.edits() && on_file(r, root, path))
                     .collect();
                 facts.add(
                     "Steps that edited it",
@@ -215,7 +211,7 @@ impl Studio {
                     let at = rows.iter().position(|r| std::ptr::eq(*r, *first))?;
                     let before: Vec<AskFact> = rows[..at]
                         .iter()
-                        .filter(|r| r.agent == first.agent && !edits(r))
+                        .filter(|r| r.agent == first.agent && !r.edits())
                         .map(|r| AskFact {
                             at: r.started_at,
                             text: describe(r),
@@ -253,7 +249,7 @@ impl Studio {
                 );
                 let mut files: Vec<&str> = rows
                     .iter()
-                    .filter(|r| edits(r))
+                    .filter(|r| r.edits())
                     .filter_map(|r| r.file.as_deref())
                     .collect();
                 files.sort();
