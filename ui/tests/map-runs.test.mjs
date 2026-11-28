@@ -45,6 +45,31 @@ test("the queue shows in order: the running run first as it was asked for, then 
   assert.deepEqual(runRows(undefined), [], "a payload from before runs has none");
 });
 
+test("a run on a Claude Code the sandbox gate has not passed on shows its warning under its note, queued, running and ended, across redraws (#774)", () => {
+  const warning = "The sandbox gate has not run on Claude Code 2.1.399 (last passed on 2.1.326).";
+  const box = new El("section");
+  // The warning's node under each row, by run: its class and text, and whether it follows the note.
+  const warnings = () =>
+    box.childNodes.filter((node) => node.dataset?.run).map((row) => {
+      const shown = row.find("p").filter((p) => p.className === "run-warning");
+      const after = shown.length === 1 && row.childNodes.indexOf(shown[0]) === row.childNodes.findIndex((node) => node.className === "run-note") + 1;
+      return [row.dataset.run, row.dataset.state, shown.map((p) => p.text), after];
+    });
+  const states = [
+    [run("a", "queued", { warning }), run("b", "queued")],
+    [run("a", "running", { warning }), run("b", "queued")],
+    [ended("a", "done", "Finished", { warning }), run("b", "running", { warning: null })],
+  ];
+  for (const runs of states) {
+    paintRuns(box, { paused: null, runs }, acts([]));
+    const [a, b] = runs;
+    assert.deepEqual(warnings(), [["a", a.state, [warning], true], ["b", b.state, [], false]], `${a.state}, then drawn again`);
+    paintRuns(box, { paused: null, runs }, acts([]));
+    assert.deepEqual(warnings(), [["a", a.state, [warning], true], ["b", b.state, [], false]], `${a.state}, after a redraw`);
+  }
+  assert.equal(runRows({ paused: null, runs: [run("c", "queued")] })[0].warning, null, "a payload from before #774 has no warning");
+});
+
 test("with no run and no pause nothing is drawn", () => {
   assert.deepEqual(runsNodes({ paused: null, runs: [] }, acts([])), []);
   assert.deepEqual(runsNodes(undefined, acts([])), []);

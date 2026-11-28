@@ -10,8 +10,9 @@ use std::{
     time::{Duration, Instant},
 };
 use studio_server::runner::{
-    BWRAP_CHECK, Config, End, Harness, HarnessCommand, Kind, Limits, Plan, Request, RunState,
-    Runner, SANDBOX_DOWN, allowed_tools, claude_command, private_tmp, sandbox_settings,
+    BWRAP_CHECK, Config, End, GATED_CLAUDE_CODE, Harness, HarnessCommand, Kind, Limits, Plan,
+    Request, RunState, Runner, SANDBOX_DOWN, allowed_tools, claude_command, gate_warning,
+    private_tmp, sandbox_settings,
 };
 use studio_test_support::LauncherGuard;
 
@@ -451,6 +452,43 @@ fn stand_ins(bin: &Path, bwrap: Option<(&str, i32)>, socat: bool) {
     for (name, script) in tools {
         fs::write(bin.join(name), script).unwrap();
         fs::set_permissions(bin.join(name), fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+#[test]
+fn a_claude_code_version_the_sandbox_gate_has_not_passed_on_warns() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let other = format!(
+        "The sandbox gate has not run on Claude Code 2.1.399 (last passed on {GATED_CLAUDE_CODE})."
+    );
+    let unknown = format!(
+        "The sandbox gate has not run on an unknown version of Claude Code (last passed on {GATED_CLAUDE_CODE})."
+    );
+    // What the fake `claude` prints for `--version`, and its exit; none: no such program.
+    let gated = format!("echo '{GATED_CLAUDE_CODE} (Claude Code)'");
+    let cases: [(&str, Option<&str>, Option<&str>); 5] = [
+        ("gated", Some(&gated), None),
+        ("other", Some("echo '2.1.399 (Claude Code)'"), Some(&other)),
+        (
+            "fails",
+            Some("echo '2.1.399 (Claude Code)'; exit 1"),
+            Some(&unknown),
+        ),
+        ("garbled", Some("echo 'usage: claude'"), Some(&unknown)),
+        ("missing", None, Some(&unknown)),
+    ];
+    for (name, script, warning) in cases {
+        let program = dir.path().join(name);
+        if let Some(script) = script {
+            fs::write(
+                &program,
+                format!("#!/bin/sh\n[ \"$1\" = --version ] || exit 9\n{script}\n"),
+            )
+            .unwrap();
+            fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert_eq!(gate_warning(&program).as_deref(), warning, "{name}");
     }
 }
 
@@ -962,6 +1000,99 @@ fn a_run_survives_a_restart_and_is_picked_up() {
     let (runner, _changes) = open(dir.path(), Arc::new(Script));
     assert!(runner.runs(PROJECT).runs.is_empty());
     assert_eq!(fs::read_dir(dir.path().join("runs")).unwrap().count(), 0);
+}
+
+/// [`Script`], on a Claude Code the sandbox gate has not passed on.
+struct Ungated;
+
+const UNGATED: &str =
+    "The sandbox gate has not run on Claude Code 2.1.399 (last passed on 2.1.326).";
+
+impl Harness for Ungated {
+    fn command(&self, plan: &Plan) -> Result<HarnessCommand, String> {
+        Script.command(plan)
+    }
+
+    fn warning(&self, _: &HarnessCommand) -> Option<String> {
+        Some(UNGATED.into())
+    }
+}
+
+#[test]
+fn a_run_on_an_ungated_claude_code_starts_and_warns_while_queued_running_ended_and_after_a_restart()
+{
+    let Bench {
+        dir,
+        // Before `runner`, so it drops after it and before `dir`.
+        guard: _guard,
+        runner,
+        changes,
+    } = bench_with(Arc::new(Ungated));
+    let folder = runner.new_folder().unwrap();
+    let request = |folder, prompt: &str| Request {
+        kind: Kind::BackLaw,
+        project: PROJECT.into(),
+        folder,
+        prompt: prompt.into(),
+        limits: Limits::of(Kind::BackLaw),
+    };
+    let running = runner
+        .submit(request(folder.clone(), &waits("ran")))
+        .unwrap();
+    let queued = runner
+        .submit(request(runner.new_folder().unwrap(), "echo queued ran"))
+        .unwrap();
+    until(&runner, &changes, |r| {
+        state(r, &running) == Some(RunState::Running)
+    });
+    let warnings = |runner: &Runner| {
+        let runs = runner.runs(PROJECT).runs;
+        let views = runs
+            .iter()
+            .map(|run| (run.id.clone(), run.state, run.warning.clone()));
+        views.collect::<Vec<_>>()
+    };
+    // Both runs, in these states, each with the warning.
+    let warned = |first, second| {
+        let warning = Some(UNGATED.to_string());
+        vec![
+            (running.clone(), first, warning.clone()),
+            (queued.clone(), second, warning),
+        ]
+    };
+    assert_eq!(
+        warnings(&runner),
+        warned(RunState::Running, RunState::Queued)
+    );
+    // plotkeeper starts again with a harness that warns of nothing: the runs keep the warning they were submitted with.
+    drop((runner, changes));
+    let (runner, changes) = open(dir.path(), Arc::new(Script));
+    assert_eq!(
+        warnings(&runner),
+        warned(RunState::Running, RunState::Queued)
+    );
+    fs::write(folder.join("go"), "").unwrap();
+    until(&runner, &changes, ended(&queued));
+    until(&runner, &changes, ended(&running));
+    assert_eq!(warnings(&runner), warned(RunState::Ended, RunState::Ended));
+    assert_eq!(
+        runner.outcome(&running).unwrap().result,
+        "ran",
+        "the warned run ran"
+    );
+    let gated = runner
+        .submit(request(runner.new_folder().unwrap(), "echo gated"))
+        .unwrap();
+    let view = runner
+        .runs(PROJECT)
+        .runs
+        .into_iter()
+        .find(|run| run.id == gated);
+    assert_eq!(
+        view.unwrap().warning,
+        None,
+        "a harness that warns of nothing gives no warning"
+    );
 }
 
 #[test]

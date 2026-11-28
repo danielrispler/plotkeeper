@@ -1,14 +1,15 @@
 // The Map view's background runs (spec danielrispler/plotkeeper#378, ticket #390): the project's queue beside the map, a running run and Cancel,
 // how an ended run ended, and one indicator while a login or limit failure pauses every queue. A run is a headless agent the server starts
 // on Daniel's click (`server/src/runner.rs`), never a session; no module starts one yet. A run that failed, or finished with tool calls
-// denied, offers its prompt to copy into his own agent, as an overturn does (`ratify.ts`).
+// denied, offers its prompt to copy into his own agent, as an overturn does (`ratify.ts`). A run on a Claude Code the sandbox gate has not
+// passed on shows that warning under its note in every state (#774).
 
 import { confirmed, drawWithStatus, failure, hint, invoke, pressable, promptBox, sayAction, text, type Confirm } from "./dom.js";
 import { onDraw, reloadMap, syncSide, type MapView } from "./map.js";
 import { copyOverturn, overturnReport } from "./ratify.js";
 import type { RunView, Runs } from "./types.js";
 
-export type RunRow = { id: string; state: RunView["state"]; title: string; note: string; action: "Cancel" | "Dismiss"; denials: string[]; prompt: string | null };
+export type RunRow = { id: string; state: RunView["state"]; title: string; note: string; warning: string | null; action: "Cancel" | "Dismiss"; denials: string[]; prompt: string | null };
 /** What a copy left to show under its run's row: the line, and for a clipboard that refused, the prompt to copy by hand. */
 export type CopyNote = { id: string; line: string; manual: string | null };
 /**
@@ -39,7 +40,7 @@ export function runRows(runs: Runs | null | undefined): RunRow[] {
   return list.map((run) => {
     const waits = runs?.paused ? "Queued, paused" : run.id === next ? "Queued, next" : "Queued";
     const note = run.state === "ended" ? (run.line ?? "Ended") : run.state === "running" ? `Running since ${clock(run.at)}` : waits;
-    return { id: run.id, state: run.state, title: kindWords[run.kind] ?? run.kind, note, action: run.state === "ended" ? "Dismiss" : "Cancel", denials: run.denials ?? [], prompt: run.prompt ?? null };
+    return { id: run.id, state: run.state, title: kindWords[run.kind] ?? run.kind, note, warning: run.warning ?? null, action: run.state === "ended" ? "Dismiss" : "Cancel", denials: run.denials ?? [], prompt: run.prompt ?? null };
   });
 }
 
@@ -65,6 +66,8 @@ function rowNode(row: RunRow, act: RunActs, note: CopyNote | null): HTMLElement 
   node.dataset.state = row.state;
   const actions = text("span", "", "run-actions");
   node.append(text("span", row.title, "run-title"), text("span", row.note, "run-note"));
+  // A warning is part of the row in every state, drawn anew with it, so it is plain text and never live (#774).
+  if (row.warning !== null) node.append(text("p", row.warning, "run-warning"));
   if (row.denials.length) {
     const denied = text("ul", "", "run-denials");
     denied.append(...row.denials.map((denial) => text("li", denial)));
