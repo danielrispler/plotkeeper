@@ -10,7 +10,9 @@
 //! error and a shell's `exit`), and from its event stream `permission.asked` and a turn's end
 //! (`session.execution.succeeded`, `.failed` or `.interrupted`; `.started` only for a turn that
 //! starts with no prompt, as when a background subagent's result wakes its parent), which carries
-//! the model the turn's steps named and the turn's last text. OpenCode reports no session start or end. A subagent is a
+//! the model the turn's steps named, the turn's last text and, on a top-level turn's, its latest
+//! step's input tokens (`context_tokens`: `session.step.ended`'s `input + cache.read +
+//! cache.write`, #719). OpenCode reports no session start or end. A subagent is a
 //! child session that always runs in the background (#718): its `subagent` call's end names it
 //! (`spawned_session_id`), and the plugin puts its calls, asks and the end of each of its runs
 //! under the session that spawned it, with its own id (`subagent_session_id`). The tool names
@@ -29,10 +31,10 @@ use std::collections::BTreeMap;
 /// The name OpenCode's plugin passes (`--agent opencode`), which its lines carry.
 pub(crate) const OPENCODE: &str = "opencode";
 
-/// What OpenCode reports: a permission that waits on Daniel, the model a turn ran at, a
-/// subagent's reply, and the trees the hook records of each turn (#717). Its transcript has no
-/// reader here, so no version or context size; no background task ids, no permission mode and no
-/// durations.
+/// What OpenCode reports: a permission that waits on Daniel, the model a turn ran at, the context
+/// size its latest step ended at (#719), a subagent's reply, and the trees the hook records of each
+/// turn (#717). Its transcript has no reader here, so no version; no background task ids, no
+/// permission mode and no durations.
 pub const CAPABILITIES: Capabilities = Capabilities {
     agent: OPENCODE,
     asks: true,
@@ -42,7 +44,7 @@ pub const CAPABILITIES: Capabilities = Capabilities {
     durations: false,
     transcript_version: false,
     transcript_model: false,
-    context: false,
+    context: true,
     turn_trees: true,
     empty_window_starts: false,
     transcript_format: TranscriptFormat::Unread,
@@ -75,6 +77,9 @@ struct Raw {
     permission: Value,
     /// On a turn's end.
     model: Option<String>,
+    /// On a top-level turn's end, its latest step's input tokens (#719); none before the plugin of
+    /// #719, or when the turn ended before any step did.
+    context_tokens: Option<u64>,
     #[serde(default)]
     last_assistant_message: String,
     /// The subagent's own session, on a line of a subagent's.
@@ -137,11 +142,33 @@ fn tool(name: &str, input: &Value, cwd: &str) -> Tool {
     }
 }
 
+/// What a turn's end, or a subagent's run's end, reports: its reply, and a turn's model and context
+/// size; a subagent's names neither. The end of a turn already past when the hook took it would end
+/// the turn running now, so it ends none, and its reply, of a turn the next start ended, is not this
+/// one's, nor its count, which may be older than the one the turn after it ended with.
+fn ended(raw: &Raw) -> Vec<Happened> {
+    let mut happened = Vec::new();
+    let subagent = raw.subagent_session_id.is_some();
+    if subagent {
+        happened.push(Happened::SubagentEnd);
+    } else if !raw.studio_late {
+        happened.push(Happened::TurnEnd);
+    }
+    if !raw.studio_late {
+        happened.push(Happened::Reply(raw.last_assistant_message.clone()));
+    }
+    happened.extend(raw.model.clone().map(Happened::Model));
+    if !subagent && !raw.studio_late {
+        happened.extend(raw.context_tokens.map(Happened::Context));
+    }
+    happened
+}
+
 fn adapt(raw: Raw) -> Event {
     let id = raw.tool_use_id.clone();
     let call = || tool(&raw.tool_name, &raw.tool_input, &raw.cwd);
     let mut happened = Vec::new();
-    let mut prompt_id = raw.prompt_id;
+    let mut prompt_id = raw.prompt_id.clone();
     match raw.hook_event_name.as_str() {
         "session.prompt" => happened.push(Happened::TurnStart {
             prompt: raw.prompt.clone(),
@@ -158,24 +185,9 @@ fn adapt(raw: Raw) -> Event {
                 origin: Some(Origin::WakeUp),
             });
         }
-        // A turn's end, or a subagent's run's end, with its reply; a subagent's names no model. The
-        // end of a turn already past when the hook took it would end the turn running now, so it
-        // ends none, and its reply, of a turn the next start ended, is not this one's.
         "session.execution.succeeded"
         | "session.execution.failed"
-        | "session.execution.interrupted" => {
-            if raw.subagent_session_id.is_some() {
-                happened.push(Happened::SubagentEnd);
-            } else if !raw.studio_late {
-                happened.push(Happened::TurnEnd);
-            }
-            if !raw.studio_late {
-                happened.push(Happened::Reply(raw.last_assistant_message.clone()));
-            }
-            if let Some(model) = raw.model.clone() {
-                happened.push(Happened::Model(model));
-            }
-        }
+        | "session.execution.interrupted" => happened = ended(&raw),
         "tool.execute.before" => happened.push(Happened::ToolStart {
             tool: call(),
             id: id.clone(),

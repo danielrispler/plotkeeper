@@ -188,6 +188,9 @@ impl Take<'_> {
         if let Some(branch) = event.branch() {
             session.transcript.branch = Some(branch.into());
         }
+        if let Some(tokens) = event.context() {
+            session.transcript.context = Some(transcript::Context { tokens });
+        }
         session.transcript_file.format = event.capabilities.transcript_format;
     }
 

@@ -62,6 +62,8 @@ fn the_recorded_run_replays_into_its_sessions_turns_and_tools() {
     );
     assert!(hello.turns.iter().all(|t| t.ended_at.is_some()));
     assert_eq!(hello.state, State::YourTurn);
+    // The plugin before #719 sent no context size.
+    assert_eq!(hello.transcript.context, None);
     let id = |s: &str| format!("chatcmpl-tool-{s}");
     assert_eq!(
         calls(&studio, HELLO),
@@ -323,4 +325,106 @@ fn opencode_lines_the_hook_took_late_end_no_turn_and_their_calls_are_the_turn_be
         calls(&studio, HELLO),
         [("call_0".into(), "write".into(), Some(0))]
     );
+}
+
+/// A top-level turn's end carries its latest step's input tokens (`context_tokens`, #719), which are
+/// the session's context size. An end without the field (a turn that ended before any step did, or
+/// the plugin before #719), a subagent's run's end and a late end leave it as it was.
+#[test]
+fn a_turn_ends_count_is_the_sessions_context_size_and_an_end_without_one_keeps_it() {
+    let line = |name: &str, at: u64, fields: Value| {
+        let mut line = json!({
+            "session_id": HELLO, "cwd": "/Users/me/work/hello", "hook_event_name": name,
+            "studio_agent": "opencode", "studio_received_ms": at,
+        });
+        line.as_object_mut()
+            .unwrap()
+            .extend(fields.as_object().unwrap().clone());
+        line.to_string()
+    };
+    let prompt = |at: u64| {
+        line(
+            "session.prompt",
+            at,
+            json!({ "prompt_id": format!("msg_{at}") }),
+        )
+    };
+    let end = |at: u64, fields: Value| line("session.execution.succeeded", at, fields);
+    let first = [prompt(10), end(20, json!({ "context_tokens": 12_091 }))];
+    let cases = [
+        (
+            "a later end's count",
+            vec![prompt(30), end(40, json!({ "context_tokens": 13_000 }))],
+            13_000,
+        ),
+        (
+            "an end without a count",
+            vec![prompt(30), end(40, json!({}))],
+            12_091,
+        ),
+        (
+            "a subagent's end",
+            vec![
+                prompt(30),
+                end(
+                    40,
+                    json!({ "subagent_session_id": "ses_child", "context_tokens": 99 }),
+                ),
+            ],
+            12_091,
+        ),
+        (
+            "a late end",
+            vec![
+                prompt(30),
+                end(40, json!({ "studio_late": true, "context_tokens": 99 })),
+            ],
+            12_091,
+        ),
+    ];
+    for (case, then, tokens) in cases {
+        let lines: Vec<_> = first.iter().cloned().chain(then).collect();
+        let studio = Studio::replayed(&lines);
+        let context = studio.session(HELLO).unwrap().transcript.context.clone();
+        assert_eq!(context.map(|c| c.tokens), Some(tokens), "{case}");
+    }
+}
+
+/// `fixtures/opencode/context.jsonl`, a real run (2026-11-28, OpenCode 2.4.2's service) of the
+/// plugin since #719: a first turn read, wrote and ran a command; a second, by `opencode run -s`,
+/// started a background subagent that read a file, whose result woke the session. A scratch plugin
+/// beside it logged each `session.step.ended`, whose `input + cache.read + cache.write` was 11,215,
+/// 11,516 and 11,689 at the session's three turn ends, and 10,180 and 10,239 at its subagent's steps.
+/// The session's context size is its last top-level step's, from each turn's end; its subagent's
+/// steps never set it, as its run's end carries no count.
+#[test]
+fn an_opencode_sessions_context_size_is_its_last_top_level_steps_input_tokens() {
+    let lines: Vec<_> = include_str!("fixtures/opencode/context.jsonl")
+        .lines()
+        .collect();
+    let id = "ses_de0180feeffehT93YWrZ2rP3WY";
+    let tokens_after = |n: usize| {
+        let studio = Studio::replayed(&lines[..n]);
+        let session = studio.session(id).unwrap();
+        session.transcript.context.as_ref().map(|c| c.tokens)
+    };
+    // Each turn's end, the subagent's run's end, the wake-up's start and its end.
+    let tokens: Vec<_> = [7, 8, 12, 15, 16, 17].map(tokens_after).into();
+    assert_eq!(
+        tokens,
+        [
+            None,
+            Some(11_215),
+            Some(11_516),
+            Some(11_516),
+            Some(11_516),
+            Some(11_689)
+        ]
+    );
+    let studio = Studio::replayed(&lines);
+    let session = studio.session(id).unwrap();
+    assert!(session.capabilities.context);
+    assert_eq!(session.turns.len(), 3);
+    assert_eq!(session.agents.len(), 1);
+    assert_eq!(session.state, State::YourTurn);
 }
