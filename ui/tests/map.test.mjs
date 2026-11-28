@@ -441,11 +441,31 @@ test("the loose files are offered by folder, each folder with the names of its f
     [["README.md", ".claude/settings.json", "docs/guide.md"], [], [["The root", "README.md", root], [".claude/", "settings.json", null], ["docs/", "guide.md", null]]],
     // Ignore would leave out the files of a part with a path inside the folder, a folder's or a file's: the server refuses it too.
     [["src/index.ts", "docs/api.md", "wiki/a.md"], parts, [["docs/", "api.md", "Ignoring docs/ would leave out the files of Docs"], ["src/", "index.ts", "Ignoring src/ would leave out the files of App and Lib"], ["wiki/", "a.md", null]]],
+    // A folder holding two or more loose rows and no files of its own is a parent row above them, at every level; one child row gets none.
+    [[...["a", "b"].map((n) => `.claude/skills/${n}/s.md`), ".claude/agents/x/a.md", ".claude/agents/y/a.md"], [], [
+      [".claude/", "2 folders", null], [".claude/agents/", "2 folders", null], [".claude/agents/x/", "a.md", null], [".claude/agents/y/", "a.md", null],
+      [".claude/skills/", "2 folders", null], [".claude/skills/a/", "s.md", null], [".claude/skills/b/", "s.md", null],
+    ]],
+    [["a/b/f.md"], [], [["a/b/", "f.md", null]]],
+    // A folder with files of its own keeps its row, and its subfolders' rows follow it; a part's files in a parent mute its Ignore only.
+    [["d/x.md", "d/e/y.md", "d/f/z.md", "k/p/1.md", "k/q/2.md"], [{ name: "Kit", paths: ["k/q/other.md"] }], [
+      ["d/", "x.md", null], ["d/e/", "y.md", null], ["d/f/", "z.md", null],
+      ["k/", "2 folders", "Ignoring k/ would leave out the files of Kit"], ["k/p/", "1.md", null], ["k/q/", "2.md", "Ignoring k/q/ would leave out the files of Kit"],
+    ]],
   ];
   for (const [files, held, rows] of cases) {
     const groups = looseGroups(files, held);
     assert.deepEqual(groups.map((g) => [g.label, g.names, g.muted]), rows, JSON.stringify(files));
     assert.deepEqual(groups.flatMap((g) => g.files).sort(), [...files].sort(), "every file is in one row");
+    assert.ok(groups.every((g) => !g.parent || !g.files.length), "a parent row holds no files to give");
+  }
+  // A row's depth is how many parent rows it sits under: the example's .claude/skills/a/ sits under .claude/skills/ and .claude/.
+  {
+    const deep = looseGroups([".claude/skills/a/s.md", ".claude/skills/b/s.md", ".claude/agents/x/a.md", ".claude/agents/y/a.md"]);
+    assert.deepEqual(deep.map((g) => [g.folder, g.parent, g.depth]), [
+      [".claude/", true, 0], [".claude/agents/", true, 1], [".claude/agents/x/", false, 2], [".claude/agents/y/", false, 2],
+      [".claude/skills/", true, 1], [".claude/skills/a/", false, 2], [".claude/skills/b/", false, 2],
+    ]);
   }
   // The folders Ignore left out are the skeleton's ignored ones that are not the copies the scan asks about, which keep their checkboxes.
   const scan = { map: JSON.stringify({ ignored: ["vendor/", "wiki/", ".claude/"] }), ignore_candidates: [{ path: "vendor/", ticked: true }, { path: "copy/", ticked: false }] };

@@ -185,26 +185,55 @@ export function draftTime(parts: number): string {
   return `About ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
 }
 
+/** One row of the scan's loose list: a folder's own files, or a parent row (#790) over the rows below it, which holds no files to give. */
+export type LooseRow = { folder: string; label: string; names: string; files: string[]; muted: string | null; parent: boolean; depth: number };
+
 /**
  * The loose files or tests of a scan (#761) as the panel offers them: one row a folder, its label, the names of its files, and why Ignore is
  * muted on it, or null: the root, and a folder holding a path of one of `parts`, whose files `ignored` would take (`map_scan.rs` refuses it).
+ * A folder with no files of its own that holds two or more rows gets a parent row above them (#790), so one Ignore takes them all; `depth`
+ * counts the parent rows a row sits under, and a parent row's `names` counts the rows right below it.
  */
-export function looseGroups(files: string[], parts: { name: string; paths: string[] }[] = []): { folder: string; label: string; names: string; files: string[]; muted: string | null }[] {
+export function looseGroups(files: string[], parts: { name: string; paths: string[] }[] = []): LooseRow[] {
   const byFolder = new Map<string, string[]>();
   for (const file of files) {
     const cut = file.lastIndexOf("/") + 1;
     const folder = file.slice(0, cut);
     byFolder.set(folder, [...(byFolder.get(folder) ?? []), file]);
   }
-  return [...byFolder.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([folder, group]) => {
-      const names = group.map((file) => file.slice(folder.length)).sort();
-      const shown = names.length > 4 ? [...names.slice(0, 3), `${names.length - 3} more`] : names;
-      const held = parts.filter((part) => part.paths.some((path) => path.startsWith(folder))).map((part) => part.name);
-      const muted = !folder ? "Ignoring the root would leave out the whole repository" : held.length ? `Ignoring ${folder} would leave out the files of ${listed(held)}` : null;
-      return { folder, label: folder || "The root", names: listed(shown), files: [...group].sort(), muted };
-    });
+  // The rows, the deepest candidate parents first, so each counts the rows below it as they stand. The root never gets a parent row.
+  const rows = new Set(byFolder.keys());
+  const below = new Map<string, number>();
+  const ancestors = new Set<string>();
+  for (const folder of byFolder.keys()) {
+    for (let cut = folder.indexOf("/") + 1; cut > 0 && cut < folder.length; cut = folder.indexOf("/", cut) + 1) ancestors.add(folder.slice(0, cut));
+  }
+  const depthOf = (folder: string) => folder.split("/").length;
+  for (const ancestor of [...ancestors].filter((a) => !byFolder.has(a)).sort((a, b) => depthOf(b) - depthOf(a))) {
+    const inside = [...rows].filter((row) => row !== ancestor && row.startsWith(ancestor));
+    const direct = inside.filter((row) => !inside.some((other) => other !== row && row.startsWith(other)));
+    if (direct.length < 2) continue;
+    rows.add(ancestor);
+    below.set(ancestor, direct.length);
+  }
+  const sorted = [...rows].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return sorted.map((folder) => {
+    const group = byFolder.get(folder) ?? [];
+    const names = group.map((file) => file.slice(folder.length)).sort();
+    const shown = names.length > 4 ? [...names.slice(0, 3), `${names.length - 3} more`] : names;
+    const held = parts.filter((part) => part.paths.some((path) => path.startsWith(folder))).map((part) => part.name);
+    const muted = !folder ? "Ignoring the root would leave out the whole repository" : held.length ? `Ignoring ${folder} would leave out the files of ${listed(held)}` : null;
+    const parent = below.has(folder);
+    return {
+      folder,
+      label: folder || "The root",
+      names: parent ? `${below.get(folder)} folders` : listed(shown),
+      files: [...group].sort(),
+      muted,
+      parent,
+      depth: sorted.filter((other) => other && other !== folder && folder.startsWith(other) && below.has(other)).length,
+    };
+  });
 }
 
 /** The folders Ignore left out of a scan's loose rows (#753): the skeleton's `ignored` that are not the copies the scan asks about, sorted. */

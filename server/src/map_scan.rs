@@ -182,7 +182,7 @@ fn fresh_id(map: &Value, new: &[Value], path: &str) -> String {
 /// holds code becomes a part of its own.
 fn ignore(map: &mut Value, folder: &str, on: bool, files: &[String]) {
     let mut list: Vec<String> = strings(&map["ignored"])
-        .filter(|p| *p != folder)
+        .filter(|p| *p != folder && !(on && p.starts_with(folder)))
         .map(String::from)
         .collect();
     if on {
@@ -220,11 +220,11 @@ fn ignore(map: &mut Value, folder: &str, on: bool, files: &[String]) {
     }
 }
 
-/// Ignores `folder`, a folder of loose files, or stops ignoring it, its files loose again. A folder that holds a part's files is refused, so
+/// Ignores `folder`, a folder of loose files, or stops ignoring it, its files loose again. Ignoring drops the patterns inside the folder, which it covers. A folder that holds a part's files is refused, so
 /// no part loses files to `ignored`, which the check reads before the parts' paths.
 fn ignore_folder(map: &mut Value, folder: &str, on: bool, files: &[String]) -> Result<(), String> {
     let mut list: Vec<String> = strings(&map["ignored"])
-        .filter(|p| *p != folder)
+        .filter(|p| *p != folder && !(on && p.starts_with(folder)))
         .map(String::from)
         .collect();
     if on {
@@ -827,6 +827,25 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn ignoring_a_parent_folder_drops_the_patterns_inside_it() {
+        let files: Vec<String> = ["a/b/x.md", "a/c/y.md", "d/z.md"]
+            .map(String::from)
+            .to_vec();
+        // (ignored before, folder, ignored after): a pattern inside the folder goes, one beside it stays, and Unignore of the parent leaves none.
+        for (before, folder, after) in [
+            (&["a/b/", "d/"][..], "a/", &["a/", "d/"][..]),
+            (&["a/b/"][..], "a/c/", &["a/b/", "a/c/"][..]),
+        ] {
+            let mut map = serde_json::json!({ "ignored": before });
+            ignore_folder(&mut map, folder, true, &files).unwrap();
+            assert_eq!(map["ignored"], serde_json::json!(after), "{folder}");
+        }
+        let mut map = serde_json::json!({ "ignored": ["a/"] });
+        ignore_folder(&mut map, "a/", false, &files).unwrap();
+        assert_eq!(map["ignored"], serde_json::json!([]));
     }
 
     #[test]

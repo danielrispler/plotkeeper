@@ -741,6 +741,9 @@ body.panel-open .map-empty { inset-inline-start: calc(var(--inset) + var(--panel
 .map-scan-check input { margin: 0; cursor: pointer; }
 .map-scan-check code, .map-scan-where code, .map-scan-ignored code { font-family: var(--mono); font-size: var(--size-small); overflow-wrap: anywhere; }
 .map-scan-loose { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: var(--sp-1) var(--sp-2); }
+.map-scan-loose { margin-inline-start: calc(var(--depth, 0) * var(--sp-5)); }
+.map-scan-parent { grid-template-columns: minmax(0, 1fr) auto; }
+.map-scan-parent .map-scan-where { grid-column: auto; }
 .map-scan-ignored { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2); }
 .map-scan-ignored code { justify-self: start; }
 .map-scan-where { grid-column: 1 / -1; margin: 0; min-width: 0; overflow-wrap: anywhere; }
