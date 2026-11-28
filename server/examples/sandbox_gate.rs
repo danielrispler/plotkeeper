@@ -497,7 +497,8 @@ fn deny_entries(g: &Ground) -> Vec<Entry> {
     ]
 }
 
-/// What [`plant`] made, to remove after the run, and which entries it planted.
+/// What [`plant`] made, to remove after the run (also on an early return, by `Drop`), and which entries it planted.
+#[derive(Default)]
 struct Planted {
     made: Vec<PathBuf>,
     names: Vec<&'static str>,
@@ -506,10 +507,7 @@ struct Planted {
 /// Plants the marker in every deny-list path that is missing, and makes its missing parents. A path that exists, even
 /// a broken link, is left as it is.
 fn plant(g: &Ground) -> Result<Planted, String> {
-    let mut planted = Planted {
-        made: Vec::new(),
-        names: Vec::new(),
-    };
+    let mut planted = Planted::default();
     for e in deny_entries(g).into_iter().filter(|e| e.deny) {
         if e.path.symlink_metadata().is_ok() {
             continue;
@@ -548,6 +546,12 @@ impl Planted {
                 fs::remove_file(p).ok();
             }
         }
+    }
+}
+
+impl Drop for Planted {
+    fn drop(&mut self) {
+        self.remove();
     }
 }
 
@@ -759,10 +763,7 @@ fn main() -> Result<(), String> {
     let planted = if wanted("deny-read") {
         plant(&g)?
     } else {
-        Planted {
-            made: Vec::new(),
-            names: Vec::new(),
-        }
+        Planted::default()
     };
     // `unavailable` wraps `claude` in `/usr/bin/sandbox-exec`, which only macOS has.
     let skip_unavailable = !cfg!(target_os = "macos");
