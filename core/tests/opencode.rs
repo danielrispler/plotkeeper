@@ -332,15 +332,10 @@ fn opencode_lines_the_hook_took_late_end_no_turn_and_their_calls_are_the_turn_be
 /// the plugin before #719), a subagent's run's end and a late end leave it as it was.
 #[test]
 fn a_turn_ends_count_is_the_sessions_context_size_and_an_end_without_one_keeps_it() {
-    let line = |name: &str, at: u64, fields: Value| {
-        let mut line = json!({
-            "session_id": HELLO, "cwd": "/Users/me/work/hello", "hook_event_name": name,
-            "studio_agent": "opencode", "studio_received_ms": at,
-        });
-        line.as_object_mut()
-            .unwrap()
-            .extend(fields.as_object().unwrap().clone());
-        line.to_string()
+    let line = |name: &str, at: u64, mut fields: Value| {
+        fields["cwd"] = "/Users/me/work/hello".into();
+        fields["studio_agent"] = OPENCODE_CAPABILITIES.agent.into();
+        server_line(HELLO, name, at, fields)
     };
     let prompt = |at: u64| {
         line(

@@ -145,8 +145,9 @@ async function recordEvents(ctx, r, signal) {
       if (child || wakeUp) turn.reply = "";
       if (wakeUp) send(r.line(event.type, top, {}));
     } else if (event.type === "session.step.started") turn.model = data.model?.id;
-    // A subagent's steps count on its own turn, whose end sends no count: they are not the session's context.
-    else if (event.type === "session.step.ended") turn.context = inputTokens(data.tokens) ?? turn.context;
+    // A subagent's steps count on its own turn, whose end sends no count: they are not the session's context. A step
+    // that names no tokens, or none at all, keeps the last count.
+    else if (event.type === "session.step.ended") turn.context = inputTokens(data.tokens) || turn.context;
     else if (event.type === "session.text.ended") turn.reply = data.text ?? "";
     else if (child) {
       send(r.line(event.type, top, { last_assistant_message: turn.reply, ...r.subagent(top, own) }));
