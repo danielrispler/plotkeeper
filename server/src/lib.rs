@@ -582,7 +582,7 @@ pub fn append(lines: &[serde_json::Value]) -> Result<(), String> {
     append_to(&studio_hook::event_log(&home), lines)
 }
 
-/// Appends `lines` to the event log `log`, under its lock.
+/// Appends `lines` to the event log `log`, under the log's lock, `events.lock`.
 pub fn append_to(log: &Path, lines: &[serde_json::Value]) -> Result<(), String> {
     let locked = studio_hook::locked(log, Duration::from_secs(60));
     let mut log = locked

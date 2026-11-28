@@ -209,7 +209,7 @@ pub fn answered_line(payload: &Value, answer: &Value) -> Value {
 /// Appends a `StudioAnswer` line to the event log and says whether it got there; the decision stands
 /// even if it cannot be logged.
 pub fn log_answer(data: &Path, line: &Value) -> bool {
-    match crate::append(&data.join("events.jsonl"), line, crate::PATIENCE) {
+    match crate::append(&crate::event_log_in(data), line, crate::PATIENCE) {
         Ok(true) => true,
         Ok(false) => {
             eprintln!("plotkeeper-answer: log the answer: the log stayed locked");

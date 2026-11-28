@@ -1,4 +1,4 @@
-//! What the hook's tests share: a scratch `HOME`, and the hook binaries run on a payload.
+//! What the hook's tests share: a scratch `HOME`, the hook binaries run on a payload, and the event log's lock held.
 use std::{
     fs,
     io::Write,
@@ -49,4 +49,17 @@ pub(crate) fn feed(mut cmd: Command, payload: &serde_json::Value) -> Child {
         .write_all(payload.to_string().as_bytes())
         .unwrap();
     child
+}
+
+/// Holds the event log's lock, `events.lock` beside `log`, as another writer or a prune would, until dropped.
+pub(crate) fn hold(log: &Path) -> fs::File {
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(log.with_file_name("events.lock"))
+        .unwrap();
+    lock.lock().unwrap();
+    lock
 }

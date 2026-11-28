@@ -1,6 +1,6 @@
 // Seam 4 (#43): the hook's deadline. The binary runs with a scratch `HOME`; the test holds the
-// event log's lock, as a stuck hook would.
-use crate::common::{feed, hook as hook_command, scratch as scratch_home};
+// event log's lock, `events.lock`, as a stuck hook would.
+use crate::common::{feed, hold, hook as hook_command, scratch as scratch_home};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -30,18 +30,19 @@ fn event() -> serde_json::Value {
     serde_json::json!({ "session_id": "s-1", "hook_event_name": "PostToolUse", "cwd": "/" })
 }
 
+// @law: log-writers-hold-the-log-lock
 #[test]
 fn a_held_lock_gives_a_drops_line_and_no_log_line_once_its_patience_runs_out() {
     let home = scratch("held");
     let log = studio_hook::event_log(&home);
-    let held = fs::File::create(&log).unwrap();
-    held.lock().unwrap();
+    let held = hold(&log);
 
     let took = hook(&home, 200, event());
+    drop(held);
 
     assert!(took >= Duration::from_millis(200), "took {took:?}");
     assert!(took < Duration::from_secs(3), "took {took:?}");
-    assert_eq!(fs::read_to_string(&log).unwrap(), "");
+    assert_eq!(fs::read_to_string(&log).unwrap_or_default(), "");
     let drops = fs::read_to_string(studio_hook::drops_file(&log)).unwrap();
     let fields: Vec<&str> = drops.trim_end().split(' ').collect();
     assert_eq!(drops.lines().count(), 1);
