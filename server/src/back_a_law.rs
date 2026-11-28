@@ -22,7 +22,7 @@
 use crate::{
     ci_laws,
     records::Notice,
-    runner::{End, Ended, Kind, Limits, Request, Runner, private_tmp},
+    runner::{End, Ended, Kind, Limits, Request, Runner, private_tmp, shared_tmp},
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
@@ -1140,7 +1140,8 @@ pub fn patch_paths(patch: &str) -> Result<Vec<String>, String> {
 }
 
 /// The host-side sandbox a proof runs each command in: `srt` with no network, loopback open, writes only to the clone and
-/// a private temp folder, and none of the folders a run may not read.
+/// a private temp folder, never to Claude Code's shared temp folder ([`shared_tmp`]), and none of the folders a run may
+/// not read.
 struct Sandbox {
     program: PathBuf,
     /// Its settings, beside the clone and never in it, so a check cannot loosen the next one's.
@@ -1185,7 +1186,7 @@ impl Sandbox {
         );
         let settings = serde_json::json!({
             "network": { "allowedDomains": [], "deniedDomains": [], "allowLocalBinding": true },
-            "filesystem": { "denyRead": deny, "allowWrite": [clone, &tmp], "denyWrite": [] },
+            "filesystem": { "denyRead": deny, "allowWrite": [clone, &tmp], "denyWrite": shared_tmp() },
         });
         let file = dir.join("srt.json");
         if let Err(error) = fs::write(&file, settings.to_string()) {

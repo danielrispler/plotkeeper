@@ -11,7 +11,7 @@ use std::{
 };
 use studio_server::runner::{
     BWRAP_CHECK, Config, End, Harness, HarnessCommand, Kind, Limits, Plan, Request, RunState,
-    Runner, SANDBOX_DOWN, allowed_tools, claude_command, private_tmp, sandbox_settings,
+    Runner, SANDBOX_DOWN, SHARED_TMP, allowed_tools, claude_command, private_tmp, sandbox_settings,
 };
 use studio_test_support::LauncherGuard;
 
@@ -242,10 +242,16 @@ fn the_claude_command_holds_the_flags_the_tools_and_the_sandbox_block() {
                 "allowUnsandboxedCommands": false,
                 "autoAllowBashIfSandboxed": false,
                 "network": { "allowLocalBinding": true },
-                "filesystem": { "denyRead": [
-                    "/home/d/Library/Application Support/plotkeeper", "~/.claude", "~/.claude.json", "~/.ssh", "~/.aws",
-                    "~/.config/gh", "~/.npmrc", "~/.netrc", "~/.cargo/credentials.toml", "~/.gnupg", "~/.kube",
-                ] },
+                "filesystem": {
+                    "denyRead": [
+                        "/home/d/Library/Application Support/plotkeeper", "~/.claude", "~/.claude.json", "~/.ssh",
+                        "~/.aws", "~/.config/gh", "~/.npmrc", "~/.netrc", "~/.cargo/credentials.toml", "~/.gnupg",
+                        "~/.kube",
+                    ],
+                    // The shared temp folder, where every session keeps its scratchpad: should Claude Code fall back to
+                    // it as the tools' `TMPDIR`, they still cannot write there (#773).
+                    "denyWrite": shared_tmp(),
+                },
             },
         })
     );
@@ -276,6 +282,94 @@ fn the_claude_command_holds_the_flags_the_tools_and_the_sandbox_block() {
         command.env.get("CLAUDE_CODE_TMPDIR").map(String::as_str),
         Some(tmp.to_str().unwrap())
     );
+    // The folder Claude Code makes there for the tools, which the launcher looks for after the harness (#773); a kind
+    // with no shell has no sandboxed tools, so nothing to look for.
+    assert_eq!(
+        command.tools_tmp,
+        Some(tmp.join(format!("claude-{}", uid())))
+    );
+    for kind in [Kind::MicroWorld, Kind::MapReview] {
+        let command = claude_command(Path::new("/bin/claude"), &plan(kind, &checks));
+        assert_eq!(command.tools_tmp, None, "{kind:?}");
+    }
+}
+
+/// This user's id, as the owner of a folder the test makes.
+fn uid() -> u32 {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(tempfile::tempdir().unwrap().path())
+        .unwrap()
+        .uid()
+}
+
+/// Claude Code's shared temp folder, `/tmp/claude-<uid>`, and on macOS its `/private/tmp` form too.
+fn shared_tmp() -> Vec<String> {
+    let uid = uid();
+    let mut shared = vec![format!("/tmp/claude-{uid}")];
+    if cfg!(target_os = "macos") {
+        shared.push(format!("/private/tmp/claude-{uid}"));
+    }
+    shared
+}
+
+/// The fake harness with a private temp folder, named in `PK_TMP`, and the tools' folder Claude Code would make in it,
+/// `claude-tools`.
+struct ToolsTmp(PathBuf);
+
+impl Harness for ToolsTmp {
+    fn command(&self, plan: &Plan) -> Result<HarnessCommand, String> {
+        let mut command = Script.command(plan)?;
+        command
+            .env
+            .insert("PK_TMP".into(), self.0.to_string_lossy().into_owned());
+        command.private_tmp = Some(self.0.clone());
+        command.tools_tmp = Some(self.0.join("claude-tools"));
+        Ok(command)
+    }
+}
+
+#[test]
+fn a_run_whose_tools_got_the_shared_temp_folder_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = LauncherGuard::new(dir.path().join("runs"));
+    settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
+    let tmp = dir.path().join("pk-tmp");
+    let (runner, changes) = open(dir.path(), Arc::new(ToolsTmp(tmp.clone())));
+    let made = "mkdir \"$PK_TMP/claude-tools\"; ";
+    let denied = r#"{"type":"result","result":"done","permission_denials":[{"tool_name":"Bash","tool_input":{"command":"curl x"}}]}"#;
+    for (script, end, result) in [
+        // The sandbox gave the tools the run's own folder: Claude Code made it.
+        (format!("{made}echo done"), End::Done, "done".to_string()),
+        // It gave them the shared one: the run's own holds nothing.
+        (
+            "echo done".into(),
+            End::Failed,
+            format!("{SHARED_TMP}\ndone"),
+        ),
+        (says(denied), End::Failed, format!("{SHARED_TMP}\ndone")),
+        // A harness that failed keeps its own reason.
+        ("echo boom; exit 1".into(), End::Failed, "boom".into()),
+    ] {
+        let id = submit(&runner, PROJECT, &script);
+        until(&runner, &changes, ended(&id));
+        let outcome = runner.outcome(&id).unwrap();
+        assert_eq!(
+            (outcome.end, outcome.result.as_str()),
+            (end, result.as_str()),
+            "{script}"
+        );
+        assert!(!tmp.exists(), "the temp folder outlived the run: {script}");
+    }
+    // The map's line says why.
+    let id = submit(&runner, PROJECT, "echo done");
+    until(&runner, &changes, ended(&id));
+    let view = runner
+        .runs(PROJECT)
+        .runs
+        .into_iter()
+        .find(|run| run.id == id)
+        .unwrap();
+    assert_eq!(view.line, Some(format!("Failed: {SHARED_TMP}")));
 }
 
 #[test]

@@ -131,7 +131,16 @@ pub struct HarnessCommand {
     /// run's own temp folder.
     #[serde(default)]
     pub private_tmp: Option<PathBuf>,
+    /// The folder Claude Code makes inside [`private_tmp`](Self::private_tmp) when its sandbox gives the tools that
+    /// folder as their `TMPDIR`, `<private_tmp>/claude-<uid>`. Missing after a harness that finished, it means the tools
+    /// got the shared `/tmp/claude-<uid>` instead, and the run fails with [`SHARED_TMP`]. None: nothing to look for.
+    #[serde(default)]
+    pub tools_tmp: Option<PathBuf>,
 }
+
+/// What a run whose tools got Claude Code's shared temp folder ends with (#773).
+pub const SHARED_TMP: &str =
+    "The sandbox gave the tools the shared temp folder, /tmp/claude-<uid>, not the run's own";
 
 /// What a run that found no working sandbox ends with.
 pub const SANDBOX_DOWN: &str = "The sandbox could not start";
@@ -216,6 +225,9 @@ impl Harness for Claude {
 /// (`data`, which holds its token) or of a credential folder. `autoAllowBashIfSandboxed` must stay `false`: with `true`,
 /// commands outside the allow list ran. `allowLocalBinding` lets a project's tests serve on loopback, which plotkeeper's
 /// own need; it also lets a run's tools reach any server on the Mac's loopback, a limit v1 accepts.
+///
+/// `denyWrite` names Claude Code's shared temp folder, [`shared_tmp`]: the tools' `TMPDIR` is the run's own folder
+/// ([`private_tmp`]), but should Claude Code fall back to the shared one, their writes there are refused (#773).
 pub fn sandbox_settings(data: &Path) -> serde_json::Value {
     serde_json::json!({
         "disableAllHooks": true,
@@ -225,12 +237,32 @@ pub fn sandbox_settings(data: &Path) -> serde_json::Value {
             "allowUnsandboxedCommands": false,
             "autoAllowBashIfSandboxed": false,
             "network": { "allowLocalBinding": true },
-            "filesystem": { "denyRead": [
-                data.to_string_lossy(), "~/.claude", "~/.claude.json", "~/.ssh", "~/.aws", "~/.config/gh", "~/.npmrc",
-                "~/.netrc", "~/.cargo/credentials.toml", "~/.gnupg", "~/.kube",
-            ] },
+            "filesystem": {
+                "denyRead": [
+                    data.to_string_lossy(), "~/.claude", "~/.claude.json", "~/.ssh", "~/.aws", "~/.config/gh",
+                    "~/.npmrc", "~/.netrc", "~/.cargo/credentials.toml", "~/.gnupg", "~/.kube",
+                ],
+                "denyWrite": shared_tmp(),
+            },
         },
     })
+}
+
+/// This user's id.
+fn uid() -> u32 {
+    // SAFETY: getuid has no preconditions and cannot fail.
+    unsafe { libc::getuid() }
+}
+
+/// Claude Code's per-user temp folder, `/tmp/claude-<uid>`, which every session shares and keeps its scratchpad in, and
+/// on macOS its `/private/tmp` form too, the path `/tmp` leads to. No run and no proof may write there.
+pub fn shared_tmp() -> Vec<PathBuf> {
+    let name = format!("claude-{}", uid());
+    let mut shared = vec![Path::new("/tmp").join(&name)];
+    if cfg!(target_os = "macos") {
+        shared.push(Path::new("/private/tmp").join(&name));
+    }
+    shared
 }
 
 /// The git commands a run's shell may use: reading, and staging inside its own clone. Never a commit, a push or `gh`.
@@ -279,7 +311,8 @@ pub(crate) fn cores() -> usize {
 /// It runs on the CLI's own login, as the writer does: the API key variables are removed, and `PLOTKEEPER_INTERNAL=1`
 /// keeps the hook from recording it. The launcher first checks that the sandbox can start ([`SANDBOX_CHECK`] on macOS,
 /// [`BWRAP_CHECK`] on Linux), and gives the run a private temp folder, [`private_tmp`], as `CLAUDE_CODE_TMPDIR`: without
-/// it, the sandbox lets the tools write into `/tmp/claude-<uid>`, where every session keeps its scratchpad.
+/// it, the sandbox lets the tools write into `/tmp/claude-<uid>`, where every session keeps its scratchpad. For a kind
+/// with a shell the launcher then looks for the folder Claude Code makes there for the tools ([`HarnessCommand::tools_tmp`]).
 pub fn claude_command(program: &Path, plan: &Plan) -> HarnessCommand {
     let mut args: Vec<String> = [
         "--restricted",
@@ -326,6 +359,10 @@ pub fn claude_command(program: &Path, plan: &Plan) -> HarnessCommand {
         .map(String::from)
         .into(),
         check: sandbox_check(),
+        tools_tmp: plan
+            .kind
+            .shell()
+            .then(|| tmp.join(format!("claude-{}", uid()))),
         private_tmp: Some(tmp),
     }
 }
@@ -550,6 +587,10 @@ struct Status {
     /// Why the harness never started.
     #[serde(default)]
     error: Option<String>,
+    /// The harness exited and the run's own temp folder held no [`HarnessCommand::tools_tmp`]: the sandbox gave the tools
+    /// the shared one.
+    #[serde(default)]
+    shared_tmp: bool,
     #[serde(default)]
     started_ms: u64,
     #[serde(default)]
@@ -635,6 +676,13 @@ pub fn launch(dir: &Path) -> Result<(), String> {
         },
         Err(status) => status,
     };
+    // Read before the folder goes.
+    let shared_tmp = status.exit.is_some()
+        && stored
+            .command
+            .tools_tmp
+            .as_deref()
+            .is_some_and(|tools| !tools.exists());
     if let Some(tmp) = made {
         // Best effort: a file already gone is fine.
         fs::remove_dir_all(tmp).ok();
@@ -642,6 +690,7 @@ pub fn launch(dir: &Path) -> Result<(), String> {
     let status = Status {
         started_ms,
         ended_ms: millis(),
+        shared_tmp,
         ..status
     };
     let written = write_json(&dir.join(STATUS), &status);
@@ -906,7 +955,9 @@ fn read_outcome(dir: &Path) -> (Outcome, Option<Status>) {
         let sandbox_failed = [&result, &errors]
             .iter()
             .any(|said| SANDBOX_FAILURES.iter().any(|word| said.contains(word)));
-        let end = if sandbox_failed {
+        // A finished run whose tools wrote in the shared temp folder is never a success (#773).
+        let shared_tmp = status.shared_tmp && status.exit == Some(0) && !is_error;
+        let end = if sandbox_failed || shared_tmp {
             End::Failed
         } else if status.exit != Some(0) || is_error {
             // Only a failure's words are read for a login or a limit: a good result may talk about either.
@@ -929,6 +980,8 @@ fn read_outcome(dir: &Path) -> (Outcome, Option<Status>) {
             end,
             result: if sandbox_failed {
                 format!("{SANDBOX_DOWN}\n{result}")
+            } else if shared_tmp {
+                format!("{SHARED_TMP}\n{result}")
             } else {
                 result
             },
