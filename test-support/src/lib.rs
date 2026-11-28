@@ -221,3 +221,6 @@ mod tests {
         guard.join().unwrap();
     }
 }
+
+pub mod fake;
+pub use fake::{Behaviour, Call, calls, fake};
