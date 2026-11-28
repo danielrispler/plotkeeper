@@ -18,6 +18,9 @@ use studio_test_support::{git, repo_in};
 use studio_understanding::{CardStore, Effects, FakeWriter, RiskNotes};
 
 const LOG: &str = include_str!("../../core/tests/fixtures/two-sessions.jsonl");
+/// A day after the fixture's last line, the prune's clock: by the real one, the fixture's sessions
+/// left the log on 2026-11-28, 30 days after it.
+const NOW: u64 = 1_793_261_013_520 + 24 * 60 * 60 * 1000;
 const FIRST: &str = "c41d8e27-6a3f-4b90-8e15-2f7a9b0c3d64";
 const TOKEN: &str = "t0k3n";
 static ASSETS: &[(&str, &[u8])] = &[("index.html", b"<html>page</html>")];
@@ -57,7 +60,7 @@ fn fixture_of(events: impl FnOnce(&std::path::Path) -> String) -> Fixture {
     )
     .unwrap();
     let app = Arc::new(app);
-    let mut follower = Follower::start(&app, &log);
+    let mut follower = Follower::start_at(&app, &log, NOW);
     follower.pass();
     let web = Web::start(app.clone(), ASSETS, TOKEN.into(), 47900).unwrap();
     app.events.set(web.sink());

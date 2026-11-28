@@ -14,6 +14,9 @@ use studio_server::{App, Follower, Notice, Sink, tell};
 use studio_understanding::{CardStore, Effects, FakeWriter, RiskNotes};
 
 const LOG: &str = include_str!("../../core/tests/fixtures/two-sessions.jsonl");
+/// A day after the fixture's last line, the prune's clock: by the real one, the fixture's sessions
+/// left the log on 2026-11-28, 30 days after it.
+const NOW: u64 = 1_793_261_013_520 + 24 * 60 * 60 * 1000;
 const OTHER: &str = "9e0b5f13-d72a-4c6e-b8f4-61a3c2d9e807";
 const FIRST: &str = "c41d8e27-6a3f-4b90-8e15-2f7a9b0c3d64";
 
@@ -81,7 +84,7 @@ fn the_replay_sends_the_list_once_and_a_live_line_sends_it_again() {
     let log = dir.path().join("events.jsonl");
     std::fs::write(&log, LOG).unwrap();
     let (app, sink) = app(&log);
-    let mut follower = Follower::start(&app, &log);
+    let mut follower = Follower::start_at(&app, &log, NOW);
 
     follower.pass();
     let lists = sink.take("sessions");
@@ -114,7 +117,7 @@ fn a_finished_turn_is_seen_only_while_the_sink_is_focused() {
     let log = dir.path().join("events.jsonl");
     std::fs::write(&log, LOG).unwrap();
     let (app, sink) = app(&log);
-    let mut follower = Follower::start(&app, &log);
+    let mut follower = Follower::start_at(&app, &log, NOW);
     follower.pass();
     studio_server::select(&app, Some(FIRST.into()));
     let mut file = std::fs::OpenOptions::new().append(true).open(&log).unwrap();
@@ -151,7 +154,7 @@ fn a_due_notice_goes_to_the_page_as_an_event_only_while_it_is_unfocused() {
     let log = dir.path().join("events.jsonl");
     std::fs::write(&log, LOG).unwrap();
     let (app, sink) = app(&log);
-    let mut follower = Follower::start(&app, &log);
+    let mut follower = Follower::start_at(&app, &log, NOW);
     follower.pass();
     sink.take("notification");
     tell(&app, Notice::Titled("A card is ready"), FIRST, None);

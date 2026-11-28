@@ -209,8 +209,14 @@ impl Follower {
     /// Prunes the log, then takes the saved state, when there is one that fits it, which starts the replay from where it
     /// stopped (danielrispler/plotkeeper#134).
     pub fn start(app: &Arc<App>, log: &Path) -> Self {
+        Self::start_at(app, log, millis())
+    }
+
+    /// [`Follower::start`] with the prune's clock, `now` in Unix milliseconds, for a test whose log is
+    /// dated: by the real clock, a recorded log ages out of the log 30 days after its last line.
+    pub fn start_at(app: &Arc<App>, log: &Path, now: u64) -> Self {
         // Before the replay, so it reads none of what the prune moves (danielrispler/plotkeeper#132).
-        match studio_hook::prune(log, millis()) {
+        match studio_hook::prune(log, now) {
             Ok(pruned) if pruned != studio_hook::Pruned::default() => log::info!(
                 "pruned the event log: {} lines archived, {} lightened",
                 pruned.archived,
