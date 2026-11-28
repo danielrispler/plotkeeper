@@ -455,5 +455,7 @@ fn a_wake_up_names_the_subagents_whose_results_its_turn_took_and_each_ends_with_
         };
         assert_eq!([status(a), status(b)], statuses, "{case}");
         assert_eq!(session.turns.len(), 2, "{case}");
+        let row = wake_up.then(|| label.to_owned());
+        assert_eq!(session.returned, row, "{case}: the row's name");
     }
 }

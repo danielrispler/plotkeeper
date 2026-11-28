@@ -679,9 +679,10 @@ impl Take<'_> {
         // An adapter's wake-up that says which tasks it took names them all, the first as its sender
         // (#779).
         // A wake-up the hook took late is of a turn already past, and names none.
+        let late = self.event.has(|h| matches!(h, Happened::Late));
         let told = origin == Some(&Origin::WakeUp)
             && self.event.has(|h| matches!(h, Happened::TasksReported(_)))
-            && !self.event.has(|h| matches!(h, Happened::Late));
+            && !late;
         let session = &mut *self.session;
         session.reply.clear();
         let sender = match origin {
@@ -696,8 +697,9 @@ impl Take<'_> {
         self.background_retries_reported(prompt);
         let session = &mut *self.session;
         match &sender {
-            // The row says which worker returned until the session's next step.
-            Sender::WakeUp(task_id) => {
+            // The row says which worker returned until the session's next step; a late wake-up
+            // leaves the running turn's.
+            Sender::WakeUp(task_id) if !late => {
                 let returned = format!("worker {} returned", session.agent_name(task_id));
                 session.returned = Some(returned);
             }
@@ -705,7 +707,7 @@ impl Take<'_> {
                 session_id: self.event.session_id.clone(),
                 task_id: task_id.clone(),
             }),
-            Sender::Daniel => {}
+            Sender::WakeUp(_) | Sender::Daniel => {}
         }
         if sender.is_daniels() {
             self.ask_name(prompt);
