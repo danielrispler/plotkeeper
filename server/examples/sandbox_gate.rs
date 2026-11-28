@@ -28,7 +28,8 @@ use std::{
     time::Duration,
 };
 use studio_server::runner::{
-    Claude, Config, Harness, HarnessCommand, Kind, Limits, Plan, Request, Runner, shared_tmp,
+    Claude, Config, Harness, HarnessCommand, Kind, Limits, MICRO_WORLD_OUT, Plan, Request, Runner,
+    shared_tmp,
 };
 
 /// How a probe's command differs from the runner's own.
@@ -321,30 +322,30 @@ fn probes(g: &Ground) -> Vec<Probe> {
         },
         Probe {
             name: "edit-rule",
-            criterion: "(From background-runs.md) The `Edit` rule on the working folder is what lets a run under \
-                        `dontAsk` write there: with the rule.",
+            criterion: "(From background-runs.md) The `Edit` rule on the output folder is what lets a run under \
+                        `dontAsk` write there: with the rule, `.micro-world/out.md` is written.",
             kind: Kind::MicroWorld,
             variant: Variant::Plain,
             checks: Vec::new(),
             setup: None,
             script: None,
-            prompt: "Create the file `out.md` in the current folder with the Write tool, containing the single line \
-                     `hello`. Then reply `done` or the exact refusal."
+            prompt: "Create the file `.micro-world/out.md` with the Write tool, containing the single line `hello`. Then \
+                     reply `done` or the exact refusal."
                 .into(),
-            fill: None,
+            fill: Some(make_out_folder),
         },
         Probe {
             name: "no-edit-rule",
-            criterion: "(From background-runs.md) The same write with the `Edit` rule dropped.",
+            criterion: "(From background-runs.md) The same write with the `Edit` rule dropped: `.micro-world/out.md` is denied.",
             kind: Kind::MicroWorld,
             variant: Variant::NoEditRule,
             checks: Vec::new(),
             setup: None,
             script: None,
-            prompt: "Create the file `out.md` in the current folder with the Write tool, containing the single line \
-                     `hello`. Then reply `done` or the exact refusal."
+            prompt: "Create the file `.micro-world/out.md` with the Write tool, containing the single line `hello`. Then \
+                     reply `done` or the exact refusal."
                 .into(),
-            fill: None,
+            fill: Some(make_out_folder),
         },
         loopback_probe("loopback", Variant::Plain, g),
     ]
@@ -436,6 +437,11 @@ fn build_probe(name: &'static str, variant: Variant) -> Probe {
         prompt: RUN_IT.into(),
         fill: Some(clone_repo),
     }
+}
+
+/// The output folder a micro-world run writes to, which the real run makes before it starts.
+fn make_out_folder(_: &Ground, work: &Path) -> Result<(), String> {
+    fs::create_dir(work.join(MICRO_WORLD_OUT)).map_err(|e| format!("{MICRO_WORLD_OUT}: {e}"))
 }
 
 fn clone_repo(g: &Ground, work: &Path) -> Result<(), String> {
@@ -698,9 +704,17 @@ fn verdict(g: &Ground, name: &str, work: &Path, stdout: &str) -> String {
             must_be_absent("touch", work.join("notallowed.txt"));
         }
         "edit-rule" | "no-edit-rule" => {
+            // The pair shows the rule: it writes the file, and without it the same write is denied.
+            let written = work.join(MICRO_WORLD_OUT).join("out.md").exists();
+            let want = name == "edit-rule";
             lines.push(format!(
-                "info out.md written: {}",
-                work.join("out.md").exists()
+                "{} {}: `{MICRO_WORLD_OUT}/out.md` written: {written}",
+                if written == want { "pass" } else { "FAIL" },
+                if want {
+                    "with the rule"
+                } else {
+                    "without the rule"
+                }
             ));
         }
         _ => {}
