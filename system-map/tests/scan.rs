@@ -423,13 +423,43 @@ fn parts_with_the_same_last_folder_take_their_parents_into_the_id() {
 
 #[test]
 fn a_language_no_extractor_reads_is_detected_and_named() {
-    let mut tree = files(&[code("src", 1)]);
-    tree.push(("src/Main.kt".into(), "x\n"));
-    tree.push(("src/main.go".into(), "package main\n"));
-    let f = found(&tree);
-    assert_eq!(f.read, ["Go", "TypeScript"]);
-    assert_eq!(f.unread, ["Kotlin"]);
-    assert_eq!(f.extractors, ["typescript-imports"]);
+    // (name, files, read languages, unread languages, detected extractors)
+    type Case = (
+        &'static str,
+        Vec<(String, &'static str)>,
+        Vec<&'static str>,
+        Vec<&'static str>,
+        Vec<&'static str>,
+    );
+    let mut unread = files(&[code("src", 1)]);
+    unread.push(("src/Main.kt".into(), "x\n"));
+    unread.push(("src/main.go".into(), "package main\n"));
+    let cases: Vec<Case> = vec![
+        (
+            "a language no extractor reads",
+            unread,
+            vec!["Go", "TypeScript"],
+            vec!["Kotlin"],
+            vec!["typescript-imports"],
+        ),
+        (
+            "C and every C++ extension the reader reads",
+            vec![
+                ("src/a.c".to_string(), "int a;\n"),
+                ("src/b.cxx".to_string(), "int b;\n"),
+                ("src/c.hh".to_string(), "int c;\n"),
+            ],
+            vec!["C", "C++"],
+            vec![],
+            vec!["c-includes"],
+        ),
+    ];
+    for (name, tree, read, unread, extractors) in cases {
+        let f = found(&tree);
+        assert_eq!(strings(&f.read), read, "{name}");
+        assert_eq!(strings(&f.unread), unread, "{name}");
+        assert_eq!(strings(&f.extractors), extractors, "{name}");
+    }
 }
 
 #[test]
