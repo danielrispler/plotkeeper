@@ -4,7 +4,7 @@
 // the lines of a real OpenCode turn that wrote `hello.txt` (#717; the first turn of
 // `core/tests/fixtures/opencode/run.jsonl`, in `/Users/me/work/hello`). Each harness's turn records
 // the start and end trees of the worktree it worked in, as Claude Code's does.
-use crate::common::{feed, hook};
+use crate::common::{feed, hold, hook};
 use serde_json::Value;
 use std::{fs, path::Path, time::Duration};
 use studio_test_support::git;
@@ -323,8 +323,7 @@ fn a_cursor_prompts_late_trees_leave_the_worktrees_start_to_its_next_touch() {
     // Another hook holds the log's lock meanwhile.
     let log = studio_hook::event_log(&home);
     fs::create_dir_all(log.parent().unwrap()).unwrap();
-    let held = fs::File::create(&log).unwrap();
-    held.lock().unwrap();
+    let held = hold(&log);
     let mut cmd = hook(&home);
     cmd.args(["--agent", "cursor"])
         .env("PATH", path)
