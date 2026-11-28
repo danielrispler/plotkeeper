@@ -2,6 +2,7 @@
 //! depends on which (spec #529, "The contract"). Each is one module behind [`Extractor`], registered in
 //! [`registry::EXTRACTORS`]; the core here runs the ones a map names and holds their output to the contract.
 
+mod c;
 mod cargo;
 #[cfg(test)]
 mod contract;
