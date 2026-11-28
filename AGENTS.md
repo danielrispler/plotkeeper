@@ -62,7 +62,7 @@ Every UI change (HTML, CSS or client-side JS, in `ui/` or elsewhere) uses two sk
 
 - **Extend before adding.** Another case of a behaviour that already has a test is a new row in that test's table (turn the test into a table if it is not one yet). A new test function is for a new behaviour.
 - **Replace narrower tests in the slice.** When the slice's test covers what older, narrower tests check, merge or delete those in the same slice, provided each one passes before and after the change and is not protected. Protected: a test tagged `@law:`, a test of the frozen samples in `understanding/tests/fixtures/stored/`, and a bug-regression case unless its exact input survives as a case of the test that replaces it. List every removed or merged test in the PR body, with the test that now covers it.
-- **Fake programs are Rust.** A test that needs a fake program uses `test-support`'s fake (`studio_test_support::fake`), never a `#!/bin/sh` script, and no code or test starts `sh` or `bash` by bare name (on Windows a bare `bash` from Rust is WSL's launcher: `docs/studio/research/windows.md`, "CI spike results").
+- **Fake programs are Rust.** A new test that needs a fake program uses `test-support`'s fake (`studio_test_support::fake`), never a `#!/bin/sh` script, and new code and tests never start `sh` or `bash` by bare name (on Windows a bare `bash` from Rust is WSL's launcher: `docs/studio/research/windows.md`, "CI spike results"). The existing shell fakes and bare `sh` starts stay until the Windows port moves them.
 
 ### Learning
 

@@ -7,8 +7,9 @@ use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     fs,
-    io::{Read, Write},
+    io::{ErrorKind, Read, Write},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 
@@ -47,21 +48,50 @@ fn record_file(fake: &Path) -> PathBuf {
     beside(fake, ".record.json")
 }
 
+/// A name for a temporary file beside `file`, unique to this process, thread and call.
+fn temp_beside(file: &Path) -> PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    beside(file, &format!(".tmp{}-{n}", std::process::id()))
+}
+
+/// Writes `text` to `file` so a reader sees all of it or the file as it was.
+fn write_whole(file: &Path, text: &str) {
+    let temp = temp_beside(file);
+    fs::write(&temp, text).unwrap();
+    fs::rename(&temp, file).unwrap();
+}
+
+/// Puts the running test binary at `file`: a hard link, or a copy where a link cannot cross
+/// filesystems. Never a symbolic link: on Linux the process's own path would read as the test
+/// binary's.
+fn place(file: &Path) {
+    let exe = std::env::current_exe().unwrap();
+    match fs::hard_link(&exe, file) {
+        Ok(()) => {}
+        // Another call made it first. Copying onto it would write onto the test binary itself.
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => {}
+        Err(e) if e.kind() == ErrorKind::CrossesDevices => {
+            // Copy under a temporary name, close it, and rename it into place: a file still open
+            // for writing makes starting it fail with "Text file busy" on Linux.
+            let temp = temp_beside(file);
+            fs::copy(&exe, &temp).unwrap();
+            fs::rename(&temp, file).unwrap();
+        }
+        Err(e) => panic!("cannot place the fake at {}: {e}", file.display()),
+    }
+}
+
 /// Makes the fake `name` in `dir` behave as `behaviour` and returns its path (`name.exe` on
-/// Windows). Calling it again for the same name rewrites the behaviour, and clears the record.
+/// Windows). Calling it again for the same name rewrites the behaviour and keeps the record.
 pub fn fake(dir: &Path, name: &str, behaviour: &Behaviour) -> PathBuf {
     let file = dir.join(if cfg!(windows) {
         format!("{name}.exe")
     } else {
         name.to_string()
     });
-    if !behaviour_file(&file).exists() {
-        fs::remove_file(&file).ok();
-        let exe = std::env::current_exe().unwrap();
-        // Never a symbolic link: on Linux the process's own path would read as the test binary's.
-        if fs::hard_link(&exe, &file).is_err() {
-            fs::copy(&exe, &file).unwrap();
-        }
+    if !file.exists() {
+        place(&file);
     }
     let spec = json!({
         "stdout": behaviour.stdout,
@@ -70,8 +100,7 @@ pub fn fake(dir: &Path, name: &str, behaviour: &Behaviour) -> PathBuf {
         "wait_ms": behaviour.wait.as_millis() as u64,
         "record": behaviour.record,
     });
-    fs::write(behaviour_file(&file), spec.to_string()).unwrap();
-    fs::remove_file(record_file(&file)).ok();
+    write_whole(&behaviour_file(&file), &spec.to_string());
     file
 }
 
@@ -113,12 +142,21 @@ fn act_as_a_fake_when_started_as_one() {
             "env": std::env::vars().collect::<BTreeMap<_, _>>(),
         });
         let file = record_file(&exe);
+        // One call at a time reads and rewrites the record, so no entry is lost.
+        let lock = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(beside(&exe, ".record.lock"))
+            .unwrap();
+        lock.lock().unwrap();
         let mut all: Vec<Value> = fs::read_to_string(&file)
             .ok()
-            .and_then(|t| serde_json::from_str(&t).ok())
+            .map(|t| serde_json::from_str(&t).unwrap())
             .unwrap_or_default();
         all.push(entry);
-        fs::write(&file, serde_json::to_string(&all).unwrap()).unwrap();
+        write_whole(&file, &serde_json::to_string(&all).unwrap());
+        drop(lock);
     }
     std::io::stdout()
         .write_all(spec["stdout"].as_str().unwrap().as_bytes())

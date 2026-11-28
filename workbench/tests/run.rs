@@ -1,4 +1,4 @@
-//! Seam 4 (#548, Testing Decisions): the process runner, with real children. A fake `git` on `PATH` prints what it was
+//! Seam 4 (#548, Testing Decisions): the process runner, with real children. A fake `git` on `PATH` records what it was
 //! started with; `sh` scripts stand in for a command that hangs, fails or leaves a helper behind.
 
 use std::{
@@ -55,7 +55,7 @@ fn a_git_never_prompts_takes_no_optional_locks_and_reads_no_input() {
     )
     .unwrap();
 
-    let out = run_until(
+    run_until(
         git(dir.path())
             .env("PATH", path)
             .args(["status", "--short"]),
@@ -63,7 +63,6 @@ fn a_git_never_prompts_takes_no_optional_locks_and_reads_no_input() {
     )
     .unwrap();
 
-    let _ = out;
     let call = only_call(&git_fake);
     assert_eq!(call.args, ["--no-optional-locks", "status", "--short"]);
     assert_eq!(call.env["GIT_TERMINAL_PROMPT"], "0");
@@ -79,9 +78,8 @@ fn a_gh_never_prompts_and_neither_does_the_git_it_starts() {
     let gh = fake(tools.path(), "gh");
     let dir = tempfile::tempdir().unwrap();
 
-    let out = run_until(gh_at(&gh, dir.path()).args(["pr", "list"]), AMPLE).unwrap();
+    run_until(gh_at(&gh, dir.path()).args(["pr", "list"]), AMPLE).unwrap();
 
-    let _ = out;
     let call = only_call(&gh);
     assert_eq!(call.args, ["pr", "list"]);
     assert_eq!(call.env["GH_PROMPT_DISABLED"], "1");
@@ -94,9 +92,8 @@ fn input_reaches_the_commands_stdin() {
     let tools = tempfile::tempdir().unwrap();
     let gh = fake(tools.path(), "gh");
 
-    let out = run_until_with_input(gh_at(&gh, tools.path()).arg("api"), b"the body\n", AMPLE);
+    run_until_with_input(gh_at(&gh, tools.path()).arg("api"), b"the body\n", AMPLE).unwrap();
 
-    out.unwrap();
     assert_eq!(only_call(&gh).stdin, "the body\n");
 }
 

@@ -1,6 +1,10 @@
 //! What the crates' tests share: `git` run away from the developer's own configuration, the
 //! temporary repositories the tests start from, and [`LauncherGuard`], which stops the
-//! `plotkeeper-run` launchers a test leaves running.
+//! `plotkeeper-run` launchers a test leaves running, and [`fake`], a fake program for tests that need
+//! one.
+
+pub mod fake;
+pub use fake::{Behaviour, Call, calls, fake};
 
 use std::{
     fs,
@@ -221,6 +225,3 @@ mod tests {
         guard.join().unwrap();
     }
 }
-
-pub mod fake;
-pub use fake::{Behaviour, Call, calls, fake};
