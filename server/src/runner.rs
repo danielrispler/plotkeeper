@@ -197,6 +197,11 @@ pub struct Plan<'a> {
 pub trait Harness: Send + Sync {
     /// The command for `plan`, or why there is none, such as a program that is not installed.
     fn command(&self, plan: &Plan) -> Result<HarnessCommand, String>;
+
+    /// What a run of `command` warns of while it runs anyway, such as a version the sandbox gate has not passed on.
+    fn warning(&self, _command: &HarnessCommand) -> Option<String> {
+        None
+    }
 }
 
 /// Claude Code, headless: `claude -p`, found as the login shell's `command -v` finds it.
@@ -208,6 +213,10 @@ impl Harness for Claude {
         let program = studio_understanding::find(shell.as_ref(), "claude")
             .ok_or("`claude` was not found, so the run cannot start")?;
         Ok(claude_command(&program, plan))
+    }
+
+    fn warning(&self, command: &HarnessCommand) -> Option<String> {
+        gate_warning(&command.program)
     }
 }
 
@@ -249,6 +258,39 @@ pub fn shared_tmp() -> Vec<PathBuf> {
         shared.push(Path::new("/private/tmp").join(&name));
     }
     shared
+}
+
+/// The Claude Code version the sandbox gate (#395) last passed on. A gate rerun that passes updates it, in the PR that
+/// records the result (`docs/studio/behaviour/background-runs.md`, "The sandbox gate").
+pub const GATED_CLAUDE_CODE: &str = "2.1.326";
+
+/// The warning a run on the Claude Code at `program` carries when the sandbox gate has not passed on its version, read
+/// from `<program> --version` (`2.1.326 (Claude Code)`); none on [`GATED_CLAUDE_CODE`]. A version that does not read is
+/// an unknown one. The run starts either way: Claude Code updates every few days, so an ungated version is the usual
+/// case (#774).
+pub fn gate_warning(program: &Path) -> Option<String> {
+    let output = studio_workbench::run::run_until(
+        Command::new(program).arg("--version"),
+        Duration::from_secs(10),
+    );
+    let said = output.map(|output| String::from_utf8_lossy(&output.stdout).into_owned());
+    let version = said.ok().and_then(|said| {
+        let first = said.split_whitespace().next()?.to_string();
+        let numbers = first.split('.').collect::<Vec<_>>();
+        let reads = numbers.len() > 1
+            && numbers
+                .iter()
+                .all(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+        reads.then_some(first)
+    });
+    let on = match version.as_deref() {
+        Some(GATED_CLAUDE_CODE) => return None,
+        Some(version) => format!("Claude Code {version}"),
+        None => "an unknown version of Claude Code".into(),
+    };
+    Some(format!(
+        "The sandbox gate has not run on {on} (last passed on {GATED_CLAUDE_CODE})."
+    ))
 }
 
 /// The git commands a run's shell may use: reading, and staging inside its own clone. Never a commit, a push or `gh`.
@@ -461,6 +503,8 @@ pub struct RunView {
     /// How an ended run ended, and one line on it.
     pub outcome: Option<End>,
     pub line: Option<String>,
+    /// What the run warns of in every state, such as a Claude Code the sandbox gate has not passed on ([`gate_warning`]).
+    pub warning: Option<String>,
     pub denials: Vec<String>,
     /// The fallback: the run's prompt, for Daniel to paste into his own agent, on every end but a clean one.
     pub prompt: Option<String>,
@@ -529,6 +573,9 @@ struct Stored {
     #[serde(default)]
     setup: Option<String>,
     command: HarnessCommand,
+    /// What the run warns of, read when it was submitted ([`Harness::warning`]); a run from before #774 has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    warning: Option<String>,
 }
 
 /// What the launcher reads of `run.json`: only what it runs, so a run of a kind this build does not know still keeps its
@@ -1124,7 +1171,8 @@ impl Runner {
     }
 
     /// Queues `request` and starts it when its project has no run going: the run's id. Reads `settings.json` now, so a
-    /// saved change counts from the next run. A run that cannot start is refused with the prompt to copy instead, and its
+    /// saved change counts from the next run, and asks the harness what the run warns of ([`Harness::warning`]: for
+    /// `claude`, a `claude --version` of up to 10 s), before it takes the runner's lock. A run that cannot start is refused with the prompt to copy instead, and its
     /// folder is removed: a harness other than `claude`, a kind with a shell in a project with no `checks`, or a harness
     /// that builds no command.
     pub fn submit(&self, request: Request) -> Result<String, Refusal> {
@@ -1172,6 +1220,7 @@ impl Runner {
             data: &self.config.data,
         };
         let mut command = self.config.harness.command(&plan).map_err(refuse)?;
+        let warning = self.config.harness.warning(&command);
         let cores = cores().to_string();
         for name in ["CARGO_BUILD_JOBS", "NEXTEST_TEST_THREADS"] {
             command.env.insert(name.into(), cores.clone());
@@ -1186,6 +1235,7 @@ impl Runner {
             timeout_secs: request.limits.timeout.as_secs().max(1),
             setup: settings.setup.filter(|_| request.kind.takes_setup()),
             command,
+            warning,
         };
         write_json(&dir.join(RUN), &stored)
             .map_err(|e| refuse(format!("the run could not be saved: {e}")))?;
@@ -1673,6 +1723,7 @@ impl Runner {
                     at,
                     outcome: outcome.map(|outcome| outcome.end),
                     line: outcome.map(|outcome| line(stored, outcome)),
+                    warning: stored.warning.clone(),
                     denials: outcome
                         .map(|outcome| outcome.denials.clone())
                         .unwrap_or_default(),
