@@ -6,6 +6,8 @@
 //! target/debug/examples/sandbox_gate <evidence folder> [probe ...]
 //! ```
 //!
+//! It runs on macOS and on Linux (#775); on Linux the `unavailable` probe is skipped and `summary.md` says so.
+//!
 //! Each probe but `srt` is a run submitted through [`Runner::submit`], so it carries the command the runner builds. A
 //! probe that tests the OS sandbox makes its escapes from `sh ./probe.sh`, a check the allow list names, so the sandbox
 //! and not the permission layer is what refuses them. Every verdict is read from the disk after the run (a file that
@@ -47,10 +49,19 @@ enum Variant {
 /// What [`Variant::LongTmp`] adds to the private folder's name: with it, `<folder>/claude-<uid>` is over 44 bytes.
 const LONG: &str = "-forced-fallback";
 
-/// Claude Code's per-user temp folder, `/private/tmp/claude-<uid>`.
+/// The shared temp folder `/tmp` leads to: `/private/tmp` on macOS, where `/tmp` is a link to it, and `/tmp` on Linux.
+fn tmp_dir() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "/private/tmp"
+    } else {
+        "/tmp"
+    }
+}
+
+/// Claude Code's per-user temp folder, `<tmp_dir>/claude-<uid>`.
 fn temp_root() -> PathBuf {
     // SAFETY: getuid has no preconditions and cannot fail.
-    PathBuf::from(format!("/private/tmp/claude-{}", unsafe { libc::getuid() }))
+    Path::new(tmp_dir()).join(format!("claude-{}", unsafe { libc::getuid() }))
 }
 
 /// The real `claude`, with a probe's variant applied to its command.
@@ -110,7 +121,7 @@ struct Ground {
     data: PathBuf,
     /// A folder outside every run's, with a planted `secret.txt`.
     outside: PathBuf,
-    /// Claude Code's per-user temp folder, `/private/tmp/claude-<uid>`.
+    /// Claude Code's per-user temp folder, `<tmp_dir>/claude-<uid>`.
     temp: PathBuf,
     home: PathBuf,
     repo: PathBuf,
@@ -185,6 +196,7 @@ fn probes(g: &Ground) -> Vec<Probe> {
     let home = g.home.display();
     let data = g.data.display();
     let outside = g.outside.display();
+    let tmp = tmp_dir();
     let deny = [
         ("data_folder_token", format!(": < '{data}/token'")),
         ("claude_dir", format!("ls '{home}/.claude'")),
@@ -225,7 +237,7 @@ fn probes(g: &Ground) -> Vec<Probe> {
             setup: None,
             script: sh(&format!(
                 "touch '{home}/.pk-gate-home'; echo home=$?\n\
-                 touch /private/tmp/pk-gate-tmp; echo private_tmp=$?\n\
+                 touch {tmp}/pk-gate-tmp; echo private_tmp=$?\n\
                  touch ../pk-gate-run-folder; echo run_folder=$?\n\
                  touch '{outside}/pk-gate-outside'; echo outside=$?\n\
                  touch inside.txt; echo inside=$?\n"
@@ -477,7 +489,7 @@ fn verdict(g: &Ground, name: &str, work: &Path, stdout: &str) -> String {
     match name {
         "write" => {
             must_be_absent("home", g.home.join(".pk-gate-home"));
-            must_be_absent("private tmp", "/private/tmp/pk-gate-tmp".into());
+            must_be_absent("private tmp", Path::new(tmp_dir()).join("pk-gate-tmp"));
             must_be_absent(
                 "run folder",
                 work.parent().unwrap().join("pk-gate-run-folder"),
@@ -589,7 +601,12 @@ fn main() -> Result<(), String> {
     let home = std::env::home_dir().ok_or("no home folder")?;
     let stamp = studio_understanding::millis();
     // Beside the real runs folder, so a run's clone sits where a real one does.
-    let root = home.join(format!("Library/Caches/plotkeeper/sandbox-gate/{stamp:x}"));
+    let cache = if cfg!(target_os = "macos") {
+        "Library/Caches"
+    } else {
+        ".cache"
+    };
+    let root = home.join(format!("{cache}/plotkeeper/sandbox-gate/{stamp:x}"));
     let (port, hits) = loopback()?;
     let g = Ground {
         data: root.join("data"),
@@ -620,9 +637,14 @@ fn main() -> Result<(), String> {
         ));
     }
 
+    let wanted = |name: &str| only.is_empty() || only.iter().any(|o| o == name);
+    // `unavailable` wraps `claude` in `/usr/bin/sandbox-exec`, which only macOS has.
+    let skip_unavailable = cfg!(target_os = "linux");
     let probes: Vec<Probe> = probes(&g)
         .into_iter()
-        .filter(|p| p.name != "srt" && (only.is_empty() || only.iter().any(|o| o == p.name)))
+        .filter(|p| {
+            p.name != "srt" && wanted(p.name) && !(skip_unavailable && p.name == "unavailable")
+        })
         .collect();
     // One settings file and one runner per variant; each probe is its own project, so the runs go side by side.
     let mut settings =
@@ -741,7 +763,13 @@ fn main() -> Result<(), String> {
             outcome.result.trim()
         ).ok();
     }
-    if only.is_empty() || only.iter().any(|o| o == "srt") {
+    if skip_unavailable && wanted("unavailable") {
+        summary.push_str(
+            "## unavailable\n\nSkipped on Linux: the probe wraps `claude` in `/usr/bin/sandbox-exec`, which Linux does not \
+             have. The start check that stands in for it there (`BWRAP_CHECK`) was proved by #704 and #709.\n\n",
+        );
+    }
+    if wanted("srt") {
         // Writing to a `String` cannot fail.
         write!(summary, "{}", srt_probe(&g, &out)?).ok();
     }
@@ -784,11 +812,12 @@ fn srt_probe(g: &Ground, out: &Path) -> Result<String, String> {
          touch inside.txt; echo inside=$?\n\
          touch '{home}/.pk-gate-srt-home'; echo home=$?\n\
          touch '{temp}/pk-gate-srt-temp'; echo temp_root=$?\n\
-         touch /private/tmp/pk-gate-srt-tmp; echo private_tmp=$?\n\
+         touch '{tmp_dir}/pk-gate-srt-tmp'; echo private_tmp=$?\n\
          ( : < '{}/token' ) 2>/dev/null; echo data_token=$?\n\
          curl -sS -m 10 -o /dev/null https://example.com; echo curl_https=$?\n\
          nc -z -w 5 1.1.1.1 443; echo nc_raw_tcp=$?\n",
-        g.data.display()
+        g.data.display(),
+        tmp_dir = tmp_dir()
     );
     fs::write(clone.join("probe.sh"), &script).map_err(|e| e.to_string())?;
     let output = Command::new("srt")
@@ -815,7 +844,7 @@ fn srt_probe(g: &Ground, out: &Path) -> Result<String, String> {
     for (label, p) in [
         ("home", g.home.join(".pk-gate-srt-home")),
         ("temp root", g.temp.join("pk-gate-srt-temp")),
-        ("private tmp", PathBuf::from("/private/tmp/pk-gate-srt-tmp")),
+        ("private tmp", Path::new(tmp_dir()).join("pk-gate-srt-tmp")),
     ] {
         let leaked = p.exists();
         lines.push(format!(
