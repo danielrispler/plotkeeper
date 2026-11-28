@@ -1,14 +1,14 @@
 // The scan screen (spec danielrispler/plotkeeper#753, "The free scan"; tickets #760, #761): a git repository with no map opens on its free scan. The
 // proposed parts are grey plates, each with its folder and file count, with no fog, badges or footprints, and the import links the readers
 // computed are lines between them. The panel beside them holds the languages line, the skeleton's optional edits (the folders to ignore, the
-// loose files and tests to give a part), Draft the map with its time hint, and the copy-prompt for another agent. A plate's press opens its
+// loose files and tests to give a part or ignore by folder, and the folders so ignored), Draft the map with its time hint, and the copy-prompt for another agent. A plate's press opens its
 // Merge into… and Split by subfolders. Each edit goes to the server, which computes the lines again (`map_scan_edit`); its answer redraws the
 // plates and lines and patches the panel in place, so the panel keeps its scroll and its focus. Nothing here is saved: the skeleton is the
 // value `map.ts` holds, the plates are placed afresh on each draw, and the camera only fits them in the canvas. `map-model.ts` holds its words.
 
 import { availability, hint, isUnavailable, patch, pressable, svg, text } from "./dom.js";
 import { fitCamera } from "./map-camera.js";
-import { autoPlace, draftTime, languagesLine, linkLines, looseGroups, type MapDoc, parseMap, plateSize, rimPoint, scanPrompt } from "./map-model.js";
+import { autoPlace, draftTime, ignoredFolders, languagesLine, linkLines, looseGroups, type MapDoc, parseMap, plateSize, rimPoint, scanPrompt } from "./map-model.js";
 import { copyButton } from "./copy-button.js";
 import type { MapScan, MapState, ScanEdit } from "./types.js";
 
@@ -27,6 +27,9 @@ const filesWord = (n: number) => `${n} ${n === 1 ? "file" : "files"}`;
 const listed = (items: string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
 // The plate to focus once the next draw is in: a merge's target, or the split part; its plate's key.
 let focusAfter: string | null = null;
+// The panel's button to focus once the next scan is drawn, after Ignore or Unignore took the pressed one away: the folder's Unignore, or the
+// first Ignore of a row inside the folder.
+let panelFocus: { act: "ignore" | "unignore"; folder: string } | null = null;
 // The scan each screen's plates were drawn from.
 const canvasOf = new WeakMap<HTMLElement, MapScan>();
 
@@ -181,9 +184,9 @@ function ignoreBlock(scan: MapScan, acts: ScanActs): HTMLElement | null {
   return set;
 }
 
-// The loose files or tests, one row a folder, each offered a part or a new part (#753, story 8).
+// The loose files or tests, one row a folder, each offered a part or a new part (#753, story 8), or Ignore, muted where it would take a part's files.
 function looseBlock(kind: "files" | "tests", files: string[], doc: Doc, acts: ScanActs): HTMLElement | null {
-  const groups = looseGroups(files);
+  const groups = looseGroups(files, doc.parts);
   if (!groups.length) return null;
   const set = text("fieldset", "", "map-scan-set");
   set.dataset.key = `scan loose ${kind}`;
@@ -209,7 +212,19 @@ function looseBlock(kind: "files" | "tests", files: string[], doc: Doc, acts: Sc
     const add = Object.assign(pressable(text("button", "Add", "btn small"), null), { type: "submit" });
     add.dataset.key = `scan add ${kind} ${group.folder}`;
     hint(add, kind === "files" ? "Give these files to the part chosen, or to a new part" : "Give these tests to the part chosen, or to a new part");
-    row.append(where, label, pick, add);
+    const ignore = pressable(text("button", "Ignore", "btn small"), null, () => {
+      if (isUnavailable(ignore)) return;
+      panelFocus = { act: "unignore", folder: group.folder };
+      acts.edit({ kind: "ignore-folder", folder: group.folder, ignored: true });
+    });
+    ignore.type = "button";
+    // Each row has an Ignore: its name says which folder.
+    ignore.setAttribute("aria-label", `Ignore ${group.label}`);
+    ignore.dataset.key = `scan ignore-folder ${kind} ${group.folder}`;
+    ignore.dataset.folder = group.folder;
+    ignore.dataset.act = "ignore";
+    availability(ignore, `Leave ${group.folder} out of the map: its files need no part`, group.muted);
+    row.append(where, label, pick, add, ignore);
     row.addEventListener("submit", (event) => {
       event.preventDefault();
       const form = event.currentTarget as HTMLFormElement;
@@ -218,6 +233,33 @@ function looseBlock(kind: "files" | "tests", files: string[], doc: Doc, acts: Sc
     });
     set.append(row);
   });
+  return set;
+}
+
+// The folders Ignore left out of the loose rows, each with Unignore, which makes their files loose again (#753).
+function ignoredBlock(scan: MapScan, acts: ScanActs): HTMLElement | null {
+  const folders = ignoredFolders(scan);
+  if (!folders.length) return null;
+  const set = text("fieldset", "", "map-scan-set");
+  set.dataset.key = "scan ignored";
+  set.append(text("legend", "Ignored folders"), text("p", "Left out of the map: their files need no part.", "map-scan-note"));
+  for (const folder of folders) {
+    const row = text("div", "", "map-scan-ignored");
+    row.dataset.key = `scan ignored ${folder}`;
+    const path = text("code", folder);
+    path.setAttribute("translate", "no");
+    const undo = pressable(text("button", "Unignore", "btn small"), null, () => {
+      panelFocus = { act: "ignore", folder };
+      acts.edit({ kind: "ignore-folder", folder, ignored: false });
+    });
+    undo.setAttribute("aria-label", `Unignore ${folder}`);
+    undo.dataset.key = `scan unignore ${folder}`;
+    undo.dataset.folder = folder;
+    undo.dataset.act = "unignore";
+    hint(undo, `Put the files of ${folder} back among the loose ones`);
+    row.append(path, undo);
+    set.append(row);
+  }
   return set;
 }
 
@@ -285,7 +327,8 @@ function panelOf(state: MapState, doc: Doc, scan: MapScan, acts: ScanActs): HTML
     note.setAttribute("role", "status");
     panel.append(note);
   }
-  panel.append(...[ignoreBlock(scan, acts), looseBlock("files", scan.loose_files, doc, acts), looseBlock("tests", scan.loose_tests, doc, acts)].filter((node) => node !== null));
+  const edits = [ignoreBlock(scan, acts), looseBlock("files", scan.loose_files, doc, acts), looseBlock("tests", scan.loose_tests, doc, acts), ignoredBlock(scan, acts)];
+  panel.append(...edits.filter((node) => node !== null));
   // Without `claude` the copy-prompt leads (#753, story 12).
   const [draft, prompt] = [draftBlock(count, scan.claude, acts), promptBlock(scan.map, !scan.claude)];
   panel.append(...(scan.claude ? [draft, prompt] : [prompt, draft]));
@@ -318,6 +361,14 @@ export function drawScan(body: HTMLElement, state: MapState, scan: MapScan, acts
     body.replaceChildren(screen);
   }
   canvasOf.set(body.firstElementChild as HTMLElement, scan);
+  // An Ignore or Unignore that did not apply leaves its button where it was, focused.
+  if (acts.note) panelFocus = null;
+  if (canvas && panelFocus !== null) {
+    const want = panelFocus;
+    panelFocus = null;
+    const buttons = [...body.querySelectorAll<HTMLElement>(".map-scan-panel button[data-folder]")];
+    buttons.find((button) => button.dataset.act === want.act && button.dataset.folder?.startsWith(want.folder))?.focus({ preventScroll: true });
+  }
   if (canvas && focusAfter !== null) {
     const want = focusAfter;
     focusAfter = null;

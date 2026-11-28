@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { actorSize, autoPlace, draftPrompt, draftProgress, draftTime, partStage, languagesLine, looseGroups, scanPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, scrubTickets, sheetOf, sheetMarks, narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, talksTo, linkLines, readingOrder, markPoints, placement, lineTag, tagWord } from "../../dist/map-model.js";
+import { actorSize, autoPlace, draftPrompt, draftProgress, draftTime, partStage, languagesLine, looseGroups, ignoredFolders, scanPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, scrubTickets, sheetOf, sheetMarks, narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, talksTo, linkLines, readingOrder, markPoints, placement, lineTag, tagWord } from "../../dist/map-model.js";
 import { cameraRig, revealPan } from "../../dist/map-camera.js";
 
 /** @returns {import("../../dist/map-model.js").Part} */
@@ -427,22 +427,30 @@ test("a Map draft's part stands where its latest group does, and the progress li
   }
 });
 
-test("the loose files are offered by folder, each folder with the names of its files", () => {
-  // (files, rows as [folder, words]): the root's own files say so, and a long folder names three and counts the rest.
-  /** @type {[string[], [string, string][]][]} */
+test("the loose files are offered by folder, each folder with the names of its files and Ignore muted where it would take a part's files", () => {
+  // (files, parts, rows as [folder, words, why Ignore is muted]): the root's own files say so, and a long folder names three and counts the rest.
+  const root = "Ignoring the root would leave out the whole repository";
+  const parts = [{ name: "App", paths: ["src/app/"] }, { name: "Lib", paths: ["src/lib/"] }, { name: "Docs", paths: ["docs/guide.md"] }];
+  /** @type {[string[], {name: string, paths: string[]}[], [string, string, string | null][]][]} */
   const cases = [
-    [[], []],
-    [["src/index.ts"], [["src/", "index.ts"]]],
-    [["src/index.ts", "main.go", "src/cli.ts", "example/demo/run.ts"], [["The root", "main.go"], ["example/demo/", "run.ts"], ["src/", "cli.ts and index.ts"]]],
-    [["t/a.ts", "t/b.ts", "t/c.ts", "t/d.ts", "t/e.ts"], [["t/", "a.ts, b.ts, c.ts and 2 more"]]],
+    [[], [], []],
+    [["src/index.ts"], [], [["src/", "index.ts", null]]],
+    [["src/index.ts", "main.go", "src/cli.ts", "example/demo/run.ts"], [], [["The root", "main.go", root], ["example/demo/", "run.ts", null], ["src/", "cli.ts and index.ts", null]]],
+    [["t/a.ts", "t/b.ts", "t/c.ts", "t/d.ts", "t/e.ts"], [], [["t/", "a.ts, b.ts, c.ts and 2 more", null]]],
     // Files that are not code, hidden ones too, are rows like any other (#753: the check asks a home for every tracked file).
-    [["README.md", ".claude/settings.json", "docs/guide.md"], [["The root", "README.md"], [".claude/", "settings.json"], ["docs/", "guide.md"]]],
+    [["README.md", ".claude/settings.json", "docs/guide.md"], [], [["The root", "README.md", root], [".claude/", "settings.json", null], ["docs/", "guide.md", null]]],
+    // Ignore would leave out the files of a part with a path inside the folder, a folder's or a file's: the server refuses it too.
+    [["src/index.ts", "docs/api.md", "wiki/a.md"], parts, [["docs/", "api.md", "Ignoring docs/ would leave out the files of Docs"], ["src/", "index.ts", "Ignoring src/ would leave out the files of App and Lib"], ["wiki/", "a.md", null]]],
   ];
-  for (const [files, rows] of cases) {
-    const groups = looseGroups(files);
-    assert.deepEqual(groups.map((g) => [g.label, g.names]), rows, JSON.stringify(files));
+  for (const [files, held, rows] of cases) {
+    const groups = looseGroups(files, held);
+    assert.deepEqual(groups.map((g) => [g.label, g.names, g.muted]), rows, JSON.stringify(files));
     assert.deepEqual(groups.flatMap((g) => g.files).sort(), [...files].sort(), "every file is in one row");
   }
+  // The folders Ignore left out are the skeleton's ignored ones that are not the copies the scan asks about, which keep their checkboxes.
+  const scan = { map: JSON.stringify({ ignored: ["vendor/", "wiki/", ".claude/"] }), ignore_candidates: [{ path: "vendor/", ticked: true }, { path: "copy/", ticked: false }] };
+  assert.deepEqual(ignoredFolders(scan), [".claude/", "wiki/"]);
+  assert.deepEqual(ignoredFolders({ map: JSON.stringify({ parts: [] }), ignore_candidates: [] }), []);
 });
 
 test("the copy-prompt carries the skeleton and says where to write the map and which check to pass", () => {
