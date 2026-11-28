@@ -90,7 +90,12 @@ pub const HOOK_BINARIES: [&str; 2] = ["plotkeeper-hook", "plotkeeper-answer"];
 
 /// The log in the studio's data directory. The hook writes it; the app reads it.
 pub fn event_log(home: &Path) -> PathBuf {
-    data_dir(home).join(EVENT_LOG)
+    event_log_in(&data_dir(home))
+}
+
+/// The log in the data folder `data`.
+pub fn event_log_in(data: &Path) -> PathBuf {
+    data.join(EVENT_LOG)
 }
 
 /// The event log's name in the data folder.
@@ -105,7 +110,14 @@ pub fn drops_file(log: &Path) -> PathBuf {
     log.with_file_name("drops.txt")
 }
 
-/// Appends `event` to the log at `log` as one line, with one write under an exclusive lock, so hooks
+/// The event log's lock beside the log `log`, `events.lock`, which every writer of the log holds while it writes and a
+/// prune holds while it puts a new log in the old one's place. Its bytes mean nothing: it is never written, read,
+/// truncated, replaced or deleted, and no reader takes it, so the log itself is never locked.
+fn lock_file(log: &Path) -> PathBuf {
+    log.with_file_name("events.lock")
+}
+
+/// Appends `event` to the log at `log` as one line, with one write under the log's lock, so hooks
 /// that fire together never interleave their lines. Waits up to `patience` for the lock; returns
 /// `false`, having written nothing, when it never came.
 pub fn append(log: &Path, event: &serde_json::Value, patience: Duration) -> std::io::Result<bool> {
@@ -119,27 +131,53 @@ pub fn append(log: &Path, event: &serde_json::Value, patience: Duration) -> std:
     Ok(true)
 }
 
-/// The log at `log`, open to append under its exclusive lock, which it waits up to `patience` for;
-/// `None` when the lock never came. A prune puts a new file in the log's place while it holds the
-/// lock (danielrispler/plotkeeper#132), so a file replaced while this waited is let go for the new one.
-pub fn locked(log: &Path, patience: Duration) -> std::io::Result<Option<fs::File>> {
-    use std::{fs::TryLockError, os::unix::fs::MetadataExt};
+/// The log open to append, under the log's lock; dropping it closes the log and lets the lock go.
+pub struct Locked {
+    log: fs::File,
+    _lock: fs::File,
+}
+
+impl std::io::Write for Locked {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.log.write(bytes)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.log.flush()
+    }
+}
+
+/// The log at `log`, open to append under the log's lock, which it waits up to `patience` for;
+/// `None` when the lock never came. A prune puts a new file in the log's place only while it holds
+/// the lock (danielrispler/plotkeeper#132), and the log is opened after the lock is taken, so it is
+/// always the one the last prune left.
+pub fn locked(log: &Path, patience: Duration) -> std::io::Result<Option<Locked>> {
+    let Some(lock) = hold(log, patience)? else {
+        return Ok(None);
+    };
+    let log = fs::OpenOptions::new().create(true).append(true).open(log)?;
+    Ok(Some(Locked { log, _lock: lock }))
+}
+
+/// The lock beside the log `log`, created if missing and locked exclusively, which it waits up to
+/// `patience` for; `None` when it never came.
+fn hold(log: &Path, patience: Duration) -> std::io::Result<Option<fs::File>> {
+    use std::fs::TryLockError;
     let deadline = Instant::now() + patience;
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_file(log))?;
     loop {
-        let file = fs::OpenOptions::new().create(true).append(true).open(log)?;
-        loop {
-            match file.try_lock() {
-                Ok(()) => break,
-                Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
-                    thread::sleep(Duration::from_millis(20));
-                }
-                Err(TryLockError::WouldBlock) => return Ok(None),
-                Err(TryLockError::Error(e)) => return Err(e),
+        match lock.try_lock() {
+            Ok(()) => return Ok(Some(lock)),
+            Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(20));
             }
-        }
-        let ours = file.metadata().map(|m| (m.dev(), m.ino()))?;
-        if fs::metadata(log).is_ok_and(|m| (m.dev(), m.ino()) == ours) {
-            return Ok(Some(file));
+            Err(TryLockError::WouldBlock) => return Ok(None),
+            Err(TryLockError::Error(e)) => return Err(e),
         }
     }
 }
@@ -226,12 +264,11 @@ impl Stamp {
 /// before `now`, in Unix milliseconds, and lightens the lines it keeps (danielrispler/plotkeeper#132).
 /// A line of no session goes by its own time; a line with no time stays. A log whose first line is
 /// recent is left as it is, so most launches read one line. The new log takes the old one's place
-/// under its lock, with the lines hooks appended meanwhile.
+/// under the log's lock, with the lines hooks appended meanwhile.
 pub fn prune(log: &Path, now: u64) -> std::io::Result<Pruned> {
     use std::{
         collections::HashMap,
         io::{self, BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
-        os::unix::fs::MetadataExt,
     };
     let cutoff = now.saturating_sub(KEEP.as_millis() as u64);
     let file = match fs::File::open(log) {
@@ -303,9 +340,10 @@ pub fn prune(log: &Path, now: u64) -> std::io::Result<Pruned> {
         archive.write_all(&archived)?;
         archive.sync_all()?;
     }
-    let held = locked(log, Duration::from_secs(60))?.ok_or(io::ErrorKind::TimedOut)?;
-    let read = file.metadata().map(|m| (m.dev(), m.ino()))?;
-    if held.metadata().map(|m| (m.dev(), m.ino()))? != read {
+    let held = hold(log, Duration::from_secs(60))?.ok_or(io::ErrorKind::TimedOut)?;
+    // Writers only append, so a log shorter than the bytes read was replaced, which only another prune
+    // could do.
+    if fs::metadata(log)?.len() < end {
         fs::remove_file(&next)?;
         return Err(io::Error::other("the log was replaced during the prune"));
     }

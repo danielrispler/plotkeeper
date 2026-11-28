@@ -196,7 +196,7 @@
   "ignored": [
     ".agents/", ".claude/", ".github/", ".gitignore", "AGENTS.md", "CHANGELOG.md", "CLAUDE.md", "Cargo.lock", "Cargo.toml", "LICENSE",
     "README.md", "package-lock.json", "package.json", "rust-toolchain.toml", "tsconfig.json", "biome.json", "knip.jsonc",
-    "skills-lock.json",
+    "skills-lock.json", ".gitattributes",
     "docs/", "scripts/agents/", "scripts/check/", "scripts/review/", "scripts/snap/", "scripts/system-map/", "scripts/wire/", "archive/",
     "wayfinder/", "test-support/"
   ],
@@ -215,6 +215,8 @@
       "text": "Install and uninstall reach Cline only through `cline plugin` and never open a file in Cline's config folder, which holds its API keys." },
     { "id": "hook-never-makes-agent-wait", "on": "hook", "backing": "trust",
       "text": "The hook never makes the agent wait, except for your answer." },
+    { "id": "log-writers-hold-the-log-lock", "on": "hook", "backing": "check",
+      "text": "Every line written to the event log is written whole, under `events.lock`; a prune replaces the log only while holding it, and no reader takes it." },
     { "id": "projects-leave-only-by-remove", "on": "server", "backing": "check",
       "text": "A saved project stays after its sessions end or are deleted, and leaves only through Remove project." },
     { "id": "core-reads-only-transcripts", "on": "core", "backing": "trust",

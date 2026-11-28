@@ -120,6 +120,37 @@ fn a_session_whose_agent_process_is_gone_gets_a_synthetic_end_and_ends() {
     assert!(super::process_ends(&studio, alive).is_empty());
 }
 
+/// The server's own lines wait for the log's lock, `events.lock`, as a hook's do, then land whole.
+// @law: log-writers-hold-the-log-lock
+#[test]
+fn the_servers_lines_wait_for_the_logs_lock_then_land_whole() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("events.jsonl");
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(dir.path().join("events.lock"))
+        .unwrap();
+    held.lock().unwrap();
+    let lines = [
+        serde_json::json!({ "session_id": "s1", "hook_event_name": "StudioRename", "studio_name": "a" }),
+        serde_json::json!({ "session_id": "s1", "hook_event_name": "StudioPromptName", "studio_name": "b" }),
+    ];
+    let appending = {
+        let (log, lines) = (log.clone(), lines.clone());
+        std::thread::spawn(move || super::append_to(&log, &lines))
+    };
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    assert!(!appending.is_finished(), "wrote without the log's lock");
+    drop(held);
+    appending.join().unwrap().unwrap();
+    let text = std::fs::read_to_string(&log).unwrap();
+    assert_eq!(text, format!("{}\n{}\n", lines[0], lines[1]));
+}
+
 #[test]
 fn an_event_reaches_what_the_shell_set_and_is_dropped_before() {
     let events = super::Events::default();
