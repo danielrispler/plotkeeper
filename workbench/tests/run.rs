@@ -1,8 +1,7 @@
-//! Seam 4 (#548, Testing Decisions): the process runner, with real children. A fake `git` on `PATH` prints what it was
+//! Seam 4 (#548, Testing Decisions): the process runner, with real children. A fake `git` on `PATH` records what it was
 //! started with; `sh` scripts stand in for a command that hangs, fails or leaves a helper behind.
 
 use std::{
-    os::unix::fs::PermissionsExt,
     path::Path,
     process::Command,
     time::{Duration, Instant},
@@ -15,19 +14,22 @@ use studio_workbench::run::{
 const SOON: Duration = Duration::from_secs(2);
 const AMPLE: Duration = Duration::from_secs(30);
 
-/// A program `name` in `dir` that prints its arguments, its environment and whether its stdin holds a line.
+/// A program `name` in `dir` that records its arguments, folder, environment and stdin.
 fn fake(dir: &Path, name: &str) -> std::path::PathBuf {
-    let file = dir.join(name);
-    let script = "#!/bin/sh\necho \"args: $*\"\necho \"cwd: $(pwd -P)\"\nenv\n\
-                  if read line; then echo \"stdin: $line\"; else echo 'stdin: none'; fi\n";
-    std::fs::write(&file, script).unwrap();
-    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
-    file
+    studio_test_support::fake(
+        dir,
+        name,
+        &studio_test_support::Behaviour {
+            record: true,
+            ..Default::default()
+        },
+    )
 }
 
-fn printed(out: std::process::Output) -> Vec<String> {
-    let text = String::from_utf8(out.stdout).unwrap();
-    text.lines().map(String::from).collect()
+fn only_call(fake: &Path) -> studio_test_support::Call {
+    let mut calls = studio_test_support::calls(fake);
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    calls.remove(0)
 }
 
 fn sh(script: &str) -> Command {
@@ -45,7 +47,7 @@ fn alive(pid: &str) -> bool {
 #[test]
 fn a_git_never_prompts_takes_no_optional_locks_and_reads_no_input() {
     let tools = tempfile::tempdir().unwrap();
-    fake(tools.path(), "git");
+    let git_fake = fake(tools.path(), "git");
     let dir = tempfile::tempdir().unwrap();
     let path = std::env::join_paths(
         std::iter::once(tools.path().to_path_buf())
@@ -53,7 +55,7 @@ fn a_git_never_prompts_takes_no_optional_locks_and_reads_no_input() {
     )
     .unwrap();
 
-    let out = run_until(
+    run_until(
         git(dir.path())
             .env("PATH", path)
             .args(["status", "--short"]),
@@ -61,14 +63,13 @@ fn a_git_never_prompts_takes_no_optional_locks_and_reads_no_input() {
     )
     .unwrap();
 
-    let lines = printed(out);
-    let has = |line: &str| lines.iter().any(|l| l == line);
-    assert!(has("args: --no-optional-locks status --short"), "{lines:?}");
-    assert!(has("GIT_TERMINAL_PROMPT=0"), "{lines:?}");
-    assert!(has("GH_PROMPT_DISABLED=1"), "{lines:?}");
-    assert!(has("stdin: none"), "{lines:?}");
+    let call = only_call(&git_fake);
+    assert_eq!(call.args, ["--no-optional-locks", "status", "--short"]);
+    assert_eq!(call.env["GIT_TERMINAL_PROMPT"], "0");
+    assert_eq!(call.env["GH_PROMPT_DISABLED"], "1");
+    assert_eq!(call.stdin, "");
     let here = dir.path().canonicalize().unwrap();
-    assert!(has(&format!("cwd: {}", here.display())), "{lines:?}");
+    assert_eq!(call.cwd, here.display().to_string());
 }
 
 #[test]
@@ -77,14 +78,13 @@ fn a_gh_never_prompts_and_neither_does_the_git_it_starts() {
     let gh = fake(tools.path(), "gh");
     let dir = tempfile::tempdir().unwrap();
 
-    let out = run_until(gh_at(&gh, dir.path()).args(["pr", "list"]), AMPLE).unwrap();
+    run_until(gh_at(&gh, dir.path()).args(["pr", "list"]), AMPLE).unwrap();
 
-    let lines = printed(out);
-    let has = |line: &str| lines.iter().any(|l| l == line);
-    assert!(has("args: pr list"), "{lines:?}");
-    assert!(has("GH_PROMPT_DISABLED=1"), "{lines:?}");
-    assert!(has("GIT_TERMINAL_PROMPT=0"), "{lines:?}");
-    assert!(has("stdin: none"), "{lines:?}");
+    let call = only_call(&gh);
+    assert_eq!(call.args, ["pr", "list"]);
+    assert_eq!(call.env["GH_PROMPT_DISABLED"], "1");
+    assert_eq!(call.env["GIT_TERMINAL_PROMPT"], "0");
+    assert_eq!(call.stdin, "");
 }
 
 #[test]
@@ -92,10 +92,9 @@ fn input_reaches_the_commands_stdin() {
     let tools = tempfile::tempdir().unwrap();
     let gh = fake(tools.path(), "gh");
 
-    let out = run_until_with_input(gh_at(&gh, tools.path()).arg("api"), b"the body\n", AMPLE);
+    run_until_with_input(gh_at(&gh, tools.path()).arg("api"), b"the body\n", AMPLE).unwrap();
 
-    let lines = printed(out.unwrap());
-    assert!(lines.iter().any(|l| l == "stdin: the body"), "{lines:?}");
+    assert_eq!(only_call(&gh).stdin, "the body\n");
 }
 
 #[test]
