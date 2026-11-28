@@ -52,7 +52,7 @@ function recorder(ctx) {
   return {
     seen: (sessionID) => roots.has(sessionID),
     root,
-    // The model and the last reply text of each top-level session's turn, for its end.
+    // The model, the last reply text and the latest step's input tokens of each top-level session's turn, for its end.
     turns: new Map(),
     // The sessions prompted since their last turn started.
     prompted: new Set(),
@@ -132,10 +132,14 @@ function recordTools(ctx, r) {
   });
 }
 
+/** A step's input tokens, the size of its prompt: fresh, cache-read and cache-written, as Claude Code's context (#719). */
+const inputTokens = (tokens) => tokens && (tokens.input ?? 0) + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0);
+
 /** The event stream's permission asks and turn starts and ends, of the sessions this instance's hooks saw: a
- * subagent's runs end under its top-level session, with its own reply and no model. */
+ * subagent's runs end under its top-level session, with its own reply and no model or context size. */
 async function recordEvents(ctx, r, signal) {
-  const types = ["session.execution.started", "session.step.started", "session.text.ended", "permission.asked", ...TURN_ENDS];
+  const steps = ["session.step.started", "session.step.ended"];
+  const types = ["session.execution.started", ...steps, "session.text.ended", "permission.asked", ...TURN_ENDS];
   types.push("session.inbox.enqueued", "session.inbox.delivered");
   for await (const event of ctx.event.subscribe({ types, signal })) {
     const data = event.data ?? {};
@@ -179,11 +183,18 @@ async function recordEvents(ctx, r, signal) {
     } else if (event.type === "session.step.started") {
       turn.model = data.model?.id;
       if (!child) r.flush(top);
-    } else if (event.type === "session.text.ended") turn.reply = data.text ?? "";
+    }
+    // A subagent's steps count on its own turn, whose end sends no count: they are not the session's context. A step
+    // that names no tokens, or none at all, keeps the last count.
+    else if (event.type === "session.step.ended") turn.context = inputTokens(data.tokens) || turn.context;
+    else if (event.type === "session.text.ended") turn.reply = data.text ?? "";
     else if (child) {
       r.send(r.line(event.type, top, { last_assistant_message: turn.reply, ...r.subagent(top, own) }));
       r.turns.delete(own);
-    } else r.send(r.line(event.type, top, { model: turn.model ?? null, last_assistant_message: turn.reply }));
+    } else {
+      const fields = { model: turn.model ?? null, last_assistant_message: turn.reply, context_tokens: turn.context ?? null };
+      r.send(r.line(event.type, top, fields));
+    }
   }
 }
 

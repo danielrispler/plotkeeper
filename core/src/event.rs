@@ -70,6 +70,9 @@ pub(crate) enum Happened {
     SubagentEnd,
     /// The model the session runs at, as the agent last said.
     Model(String),
+    /// How full the session's context is, in tokens, where its agent's hooks say (OpenCode's, #719);
+    /// Claude Code's comes from its transcript.
+    Context(u64),
     /// The git branch of the session's workspace.
     Branch(String),
 
@@ -448,6 +451,13 @@ impl Event {
     pub(crate) fn model(&self) -> Option<&str> {
         self.find(|h| match h {
             Happened::Model(model) => Some(model.as_str()),
+            _ => None,
+        })
+    }
+
+    pub(crate) fn context(&self) -> Option<u64> {
+        self.find(|h| match h {
+            Happened::Context(tokens) => Some(*tokens),
             _ => None,
         })
     }

@@ -150,11 +150,12 @@ fn bench_with(map: &str, agent: &str, home: bool) -> Bench {
         "node --test --test-reporter=tap tests/*.test.mjs",
     ] } });
     fs::write(&settings, checks.to_string()).unwrap();
-    // The fake `srt`: it insists on its settings file and runs the command as it is. `srt.started` says it ever ran.
+    // The fake `srt`: it insists on its settings file, keeps a copy as `srt.settings.json`, and runs the command as it
+    // is. `srt.started` says it ever ran.
     let srt = root.join("srt");
     fs::write(
         &srt,
-        format!("#!/bin/sh\ntouch '{}/srt.started'\n", root.display()) + "[ \"$1\" = -s ] && [ -f \"$2\" ] && [ \"$3\" = -c ] || { echo \"fake srt: $*\" >&2; exit 64; }\nexec /bin/sh -c \"$4\"\n",
+        format!("#!/bin/sh\ntouch '{}/srt.started'\n", root.display()) + "[ \"$1\" = -s ] && [ -f \"$2\" ] && [ \"$3\" = -c ] || { echo \"fake srt: $*\" >&2; exit 64; }\n" + &format!("cp \"$2\" '{}/srt.settings.json'\n", root.display()) + "exec /bin/sh -c \"$4\"\n",
     )
     .unwrap();
     fs::set_permissions(&srt, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
@@ -384,6 +385,28 @@ impl Bench {
     fn srt_started(&self) -> bool {
         self.dir.path().join("srt.started").exists()
     }
+}
+
+/// The proof's sandbox lets no check write into Claude Code's shared temp folder, where every session keeps its
+/// scratchpad (#773): `/tmp/claude-<uid>`, and on macOS its `/private/tmp` form.
+#[test]
+fn the_proofs_sandbox_denies_writes_to_the_shared_temp_folder() {
+    use std::os::unix::fs::MetadataExt;
+    let bench = bench(&format!("set -e\n{TEST}{PLANT}{DONE}"));
+    let id = bench.start();
+    assert_eq!(bench.settled(&id).state, PatchState::Proven);
+    let settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(bench.dir.path().join("srt.settings.json")).unwrap())
+            .unwrap();
+    let uid = fs::metadata(bench.dir.path()).unwrap().uid();
+    let mut shared = vec![format!("/tmp/claude-{uid}")];
+    if cfg!(target_os = "macos") {
+        shared.push(format!("/private/tmp/claude-{uid}"));
+    }
+    assert_eq!(
+        settings["filesystem"]["denyWrite"],
+        serde_json::json!(shared)
+    );
 }
 
 /// The sandbox fails closed (#548): its deny list names folders of the home folder, so with none known no proof runs.

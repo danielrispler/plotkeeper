@@ -181,7 +181,7 @@ What the list and the rail call an agent session: the name Daniel gave it, else 
 _Avoid_: Title
 
 **Context size**:
-How many tokens an agent session's context holds: the input tokens of its latest message, read from its transcript, shown in its row as "85k". The control room knows no window size, so it shows no share of it.
+How many tokens an agent session's context holds: the input tokens of its latest message, read from its transcript (an OpenCode session's from its turns' ends, #719), shown in its row as "85k". The control room knows no window size, so it shows no share of it.
 
 **Context share** (retired):
 Retired with the status line snapshots that measured it (#416); its code is in `archive/`. How much of its context window an agent session used, as a percentage, from the session's status line snapshot: its tokens, its window size, and Claude Code's own percent used and left. Only sessions the desktop app started saved a snapshot.
