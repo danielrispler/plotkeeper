@@ -403,6 +403,11 @@ fn a_wake_up_names_the_subagents_whose_results_its_turn_took_and_each_ends_with_
         json!({ "prompt_id": "msg_1", "prompt": "And now?" }),
     );
     let delivered = |pairs: &[(&str, &str)]| hello("session.inbox.delivered", 950, reported(pairs));
+    let late_wake = |pairs: &[(&str, &str)]| {
+        let mut fields = reported(pairs);
+        fields["studio_late"] = true.into();
+        hello("session.execution.started", 850, fields)
+    };
     let completed = Status::Completed;
     let failed = Status::Ended("failed".into());
     let interrupted = Status::Ended("interrupted".into());
@@ -424,6 +429,8 @@ fn a_wake_up_names_the_subagents_whose_results_its_turn_took_and_each_ends_with_
             vec![prompt, delivered(&[(a, "cancelled")])], "And now?", false, [interrupted.clone(), completed.clone()]),
         ("a result after its child's end, OpenCode's own order, still ends it with its status",
             vec![run_end(800, Some(b)), wake(Some(&[(b, "error")]))], "worker B returned", true, [completed.clone(), failed.clone()]),
+        ("a wake-up the hook took late ends its child but leaves the running wake-up's name",
+            vec![wake(Some(&[(b, "completed")])), late_wake(&[(a, "error")])], "worker B returned", true, [failed.clone(), completed.clone()]),
     ];
     for (case, after, label, wake_up, statuses) in cases {
         let mut lines = two_children();

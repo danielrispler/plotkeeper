@@ -157,7 +157,7 @@ async function recordEvents(ctx, r, signal) {
     if (event.type === "session.inbox.enqueued") {
       const metadata = data.item?.payload?.metadata;
       const result = { subagent_session_id: metadata?.childID, state: metadata?.state };
-      if (!child && metadata?.source === "subagent") r.results.set(data.inboxID, result);
+      if (!child && metadata?.source === "subagent" && metadata.childID) r.results.set(data.inboxID, result);
       continue;
     }
     if (event.type === "session.inbox.delivered") {

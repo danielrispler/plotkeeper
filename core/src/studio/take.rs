@@ -678,8 +678,10 @@ impl Take<'_> {
         let reported = self.reported_tasks();
         // An adapter's wake-up that says which tasks it took names them all, the first as its sender
         // (#779).
+        // A wake-up the hook took late is of a turn already past, and names none.
         let told = origin == Some(&Origin::WakeUp)
-            && self.event.has(|h| matches!(h, Happened::TasksReported(_)));
+            && self.event.has(|h| matches!(h, Happened::TasksReported(_)))
+            && !self.event.has(|h| matches!(h, Happened::Late));
         let session = &mut *self.session;
         session.reply.clear();
         let sender = match origin {
@@ -729,7 +731,7 @@ impl Take<'_> {
                 session.unblock();
             }
             session.reopen_turn();
-            // Claude Code's wake-ups keep the name its markup gives.
+            // Named after every task it took; Claude Code's wake-ups keep the name their markup gives.
             if told {
                 session.wake_up_took(&reported);
             }

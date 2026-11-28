@@ -127,8 +127,8 @@ impl Reported {
 }
 
 /// The tasks a line reports on, each with how it ended.
-fn reported(reported: Option<&[Reported]>) -> Option<Happened> {
-    let tasks = reported?.iter().map(Reported::task);
+fn reported(results: Option<&[Reported]>) -> Option<Happened> {
+    let tasks = results?.iter().map(Reported::task);
     Some(Happened::TasksReported(tasks.collect()))
 }
 

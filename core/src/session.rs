@@ -293,7 +293,7 @@ pub struct Turn {
     /// The tasks a wake-up's turn took the results of, in order, for an agent that says which
     /// (OpenCode, #779); empty for any other turn.
     #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
-    pub(crate) woken_by: Vec<String>,
+    pub(crate) results_of: Vec<String>,
     /// The id its `Stop` gives a card or a summary on it (`Stopped::card`); `None` until it stopped.
     pub id: Option<String>,
     /// The first line of its final reply, from its `Stop`.
@@ -1090,12 +1090,12 @@ impl Session {
             return;
         };
         for task in tasks {
-            if !turn.woken_by.contains(task) {
-                turn.woken_by.push(task.clone());
+            if !turn.results_of.contains(task) {
+                turn.results_of.push(task.clone());
             }
         }
-        let woken_by = turn.woken_by.clone();
-        let names: Vec<&str> = woken_by.iter().map(|id| self.agent_name(id)).collect();
+        let results_of = turn.results_of.clone();
+        let names: Vec<&str> = results_of.iter().map(|id| self.agent_name(id)).collect();
         let label = match names.as_slice() {
             [] => "background job returned".into(),
             [name] => format!("worker {name} returned"),
