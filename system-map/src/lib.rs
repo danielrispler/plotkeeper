@@ -6,6 +6,7 @@
 // Spec #548, Group 3: these two crates document their public API.
 #![warn(missing_docs)]
 
+pub mod cli;
 mod commit;
 mod edges;
 mod extract;
@@ -13,6 +14,7 @@ mod imports;
 mod laws;
 mod parts;
 mod pattern;
+mod scan;
 mod touched;
 
 use std::{
@@ -30,6 +32,9 @@ pub use imports::{Across, Count, Hub, Imports, Inside, Share, imports};
 pub use laws::{LawReport, LawTest, Tag, attribute_brackets, law_tests, tag_id, test_name_after};
 pub use parts::{convert, convert_value, part_text};
 use pattern::Pattern;
+pub use scan::{
+    IgnoreCandidate, Scan, folder_title, id_words, is_code, is_test, placeholder_part, scan,
+};
 pub use touched::{Touched, held_reached, touched, touched_for_map};
 
 /// The map file's name, at the repository's root.
@@ -315,14 +320,22 @@ struct Hop {
 
 /// Reads the map in `root` and checks it against the files git tracks there.
 pub fn check(root: &Path) -> Report {
-    check_with(root, tracked_files(root), None)
+    check_with(root, tracked_files(root), None, None)
 }
 
 /// `check` against `files`, the tracked files as a caller listed them: plotkeeper lists a clone's inside its sandbox, since
 /// git outside it would read the clone's own config (back a law, #398).
 pub fn check_files(root: &Path, files: Vec<String>) -> Report {
     let files: BTreeSet<String> = files.into_iter().collect();
-    check_with(root, Ok(files.into_iter().collect()), None)
+    check_with(root, Ok(files.into_iter().collect()), None, None)
+}
+
+/// `check` of the map `map_text` as if `system-map.json` in `root` held it, against `files`, the tracked files as a caller
+/// listed them: for a map not on disk yet, such as a scan's draft or one not yet accepted. The files' texts are read from
+/// the working tree at `root`.
+pub fn check_text(root: &Path, files: Vec<String>, map_text: &str) -> Report {
+    let files: BTreeSet<String> = files.into_iter().collect();
+    check_with(root, Ok(files.into_iter().collect()), None, Some(map_text))
 }
 
 /// `check` of the commit `commit` of the repository at `root`, read from git with nothing checked out (spec #477, "Reading
@@ -335,6 +348,7 @@ pub fn check_at(root: &Path, commit: &str, trusted: bool) -> Report {
             root,
             Ok(snapshot.files.clone()),
             Some((&snapshot.texts, trusted)),
+            None,
         ),
         Err(problem) => Report {
             problems: vec![problem],
@@ -359,20 +373,22 @@ pub fn law_reports(
 }
 
 /// `check` of the tracked `files`, their texts read from the working tree at `root`, or in commit mode from the commit's
-/// texts, with whether the commit is trusted.
+/// texts, with whether the commit is trusted. `map_text` is the map when it is given as text rather than read.
 fn check_with(
     root: &Path,
     files: Result<Vec<String>, String>,
     commit: Option<(&BTreeMap<String, String>, bool)>,
+    map_text: Option<&str>,
 ) -> Report {
     let texts = commit.map(|(texts, _)| texts);
     let mut report = Report::default();
-    let loaded = match texts {
-        Some(texts) => texts
+    let loaded = match (map_text, texts) {
+        (Some(text), _) => parse(text),
+        (None, Some(texts)) => texts
             .get(MAP_FILE)
             .ok_or_else(missing_map)
             .and_then(|text| parse(text)),
-        None => load(root),
+        (None, None) => load(root),
     };
     let map = match loaded {
         Ok(map) => map,
@@ -645,7 +661,10 @@ fn check_ids_and_references(map: &Map) -> Vec<String> {
 const GIT_LIMIT: Duration = Duration::from_secs(30);
 
 /// The files git tracks in `root`, sorted.
-fn tracked_files(root: &Path) -> Result<Vec<String>, String> {
+///
+/// # Errors
+/// When git cannot list them.
+pub fn tracked_files(root: &Path) -> Result<Vec<String>, String> {
     let listed = run_until(git(root).args(["ls-files", "-z"]), GIT_LIMIT);
     let output = listed.map_err(|error| match error {
         RunError::Start(error) => format!("cannot run git in {}: {error}", root.display()),

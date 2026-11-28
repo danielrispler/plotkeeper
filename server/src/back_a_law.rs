@@ -630,116 +630,46 @@ impl LawRuns {
             return Err("the patch has no test patch or proof".into());
         };
         let repo = Path::new(project);
-        let (reference, _) =
-            crate::map::default_ref(repo).ok_or("the project has no default branch")?;
-        let (remote, base) = match reference.split_once('/') {
-            Some((remote, base)) => (remote.to_string(), base.to_string()),
-            None => ("origin".to_string(), reference.clone()),
-        };
         // The default branch as it is now: a patch is out of date against it, not against the last fetch.
-        if reference.contains('/') {
-            host_git(repo, &["fetch", "-q", &remote, &base])
-                .map_err(|e| format!("the fetch failed: {e}"))?;
-        }
+        let reference = default_branch_now(repo)?;
         let law = patch
             .text
             .clone()
             .unwrap_or_else(|| law_text(repo, &reference, &patch.law));
         let branch = format!("back-a-law/{}-{id}", patch.law);
-        // An earlier click may have pushed the branch and stopped short: a PR it opened is recorded now, and a branch with no
-        // PR is pushed anew.
-        let listed = gh(
-            self.gh(),
-            repo,
-            &[
-                "pr", "list", "--head", &branch, "--state", "all", "--json", "url", "--jq",
-                ".[].url",
-            ],
-            "",
-        )?;
-        if !listed.is_empty() {
+        // An earlier click may have pushed the branch and stopped short: a PR it opened is recorded now.
+        if let Some(listed) = earlier_pr(repo, self.gh(), &reference, &branch)? {
             return self.opened(project, &file, patch, &law, &listed);
         }
-        if host_git(
-            repo,
-            &["ls-remote", "--exit-code", "--heads", &remote, &branch],
-        )
-        .is_ok()
-        {
-            host_git(
+        let title = if patch.text.is_some() {
+            format!("Add the law `{}` with a test", patch.law)
+        } else {
+            format!("Back the law `{}` with a test", patch.law)
+        };
+        let body = pr_body(&patch.law, &law, &proof, patch.text.is_some());
+        let made = open_draft(
+            &DraftPr {
                 repo,
-                &["push", "-q", "--no-verify", &remote, "--delete", &branch],
-            )
-            .map_err(|e| format!("the branch an earlier click pushed was not removed: {e}"))?;
-        }
-        let tmp = tempfile::Builder::new()
-            .prefix("law-pr-")
-            .tempdir_in(&self.config.data)
-            .map_err(|e| format!("the temporary worktree: {e}"))?;
-        let work = tmp.path().join("work");
-        let work_text = work.to_str().ok_or("the path is not text")?.to_string();
-        let made = (|| -> Result<Option<String>, String> {
-            host_git(
-                repo,
-                &["worktree", "add", "-q", "--detach", &work_text, &reference],
-            )?;
-            host_git(&work, &["switch", "-q", "-C", &branch])?;
-            let patch_file = tmp.path().join("test.patch");
-            fs::write(&patch_file, &diff).map_err(|e| e.to_string())?;
-            let patch_text = patch_file.to_str().ok_or("the path is not text")?;
-            match host_git(&work, &["apply", "--3way", patch_text]) {
-                Ok(_) => {}
-                // git refused the patch: it is out of date. A git that did not run or ran out of time says so instead.
-                Err(LawError::Git(RunError::Failed(_))) => return Ok(None),
-                Err(e) => return Err(e.into()),
-            }
-            let title = if patch.text.is_some() {
-                format!("Add the law `{}` with a test", patch.law)
-            } else {
-                format!("Back the law `{}` with a test", patch.law)
-            };
-            host_git(
-                &work,
-                &["commit", "-q", "--no-verify", "-m", &title, "-m", &law],
-            )?;
-            host_git(&work, &["push", "-q", "--no-verify", &remote, &branch])?;
-            let body = pr_body(&patch.law, &law, &proof, patch.text.is_some());
-            gh(
-                self.gh(),
-                &work,
-                &[
-                    "pr",
-                    "create",
-                    "--draft",
-                    "--head",
-                    &branch,
-                    "--base",
-                    &base,
-                    "--title",
-                    &title,
-                    "--body-file",
-                    "-",
-                ],
-                &body,
-            )
-            .map(Some)
-            .map_err(String::from)
-        })();
-        // The temporary worktree is emptied of what a failed step left and removed by its path, without forcing git and
-        // without pruning, which would drop the records of Daniel's own worktrees whose folders are away.
-        if work.exists() {
-            // Best effort: the `worktree remove` below logs a failure.
-            host_git(&work, &["reset", "-q", "--hard"]).ok();
-            // Best effort: the `worktree remove` below logs a failure.
-            host_git(&work, &["clean", "-fdq"]).ok();
-            if let Err(e) = host_git(repo, &["worktree", "remove", &work_text]) {
-                log::warn!("back a law: the temporary worktree {work_text} was not removed: {e}");
-            }
-        }
-        drop(tmp);
-        if let Err(e) = host_git(repo, &["branch", "-q", "-D", &branch]) {
-            log::warn!("back a law: the temporary branch {branch} was not deleted: {e}");
-        }
+                data: &self.config.data,
+                gh: self.gh(),
+                reference: &reference,
+                branch: &branch,
+                title: &title,
+                message: &law,
+                body: &body,
+            },
+            |work, tmp| {
+                let patch_file = tmp.join("test.patch");
+                fs::write(&patch_file, &diff).map_err(|e| e.to_string())?;
+                let patch_text = patch_file.to_str().ok_or("the path is not text")?;
+                match host_git(work, &["apply", "--3way", patch_text]) {
+                    Ok(_) => Ok(true),
+                    // git refused the patch: it is out of date. A git that did not run or ran out of time says so instead.
+                    Err(LawError::Git(RunError::Failed(_))) => Ok(false),
+                    Err(e) => Err(e.into()),
+                }
+            },
+        );
         let Some(url) = made? else {
             self.keep(
                 &file,
@@ -764,11 +694,8 @@ impl LawRuns {
         law: &str,
         url: &str,
     ) -> Result<Opened, String> {
-        let url = url.lines().next().unwrap_or_default().trim().to_string();
-        let number = url
-            .rsplit_once("/pull/")
-            .and_then(|(_, n)| n.trim().parse::<u64>().ok())
-            .ok_or_else(|| format!("gh did not say the PR's number: {url}"))?;
+        let (number, url) =
+            pr_number(url).ok_or_else(|| format!("gh did not say the PR's number: {url}"))?;
         self.keep(
             file,
             LawPatch {
@@ -1044,6 +971,171 @@ fn gh(program: PathBuf, dir: &Path, args: &[&str], input: &str) -> Result<String
     })?;
     let text = String::from_utf8_lossy(&out.stdout);
     Ok(text.lines().last().unwrap_or_default().trim().to_string())
+}
+
+/// `repo`'s default branch as it is on its remote now (`origin/main`, say), fetched first; a local one when `origin/HEAD` is not set.
+pub(crate) fn default_branch_now(repo: &Path) -> Result<String, String> {
+    let (reference, _) =
+        crate::map::default_ref(repo).ok_or("the project has no default branch")?;
+    if reference.contains('/') {
+        let (remote, base) = remote_of(&reference);
+        host_git(repo, &["fetch", "-q", remote, base])
+            .map_err(|e| format!("the fetch failed: {e}"))?;
+    }
+    Ok(reference)
+}
+
+/// What an earlier press of Open draft PR left on `branch`, which may have pushed it and stopped short: the address of the PR it
+/// opened, of any state, as `gh` lists it; else none, and a branch it pushed with no PR is deleted from the remote of the default
+/// branch `reference`, so this press pushes it anew.
+pub(crate) fn earlier_pr(
+    repo: &Path,
+    gh_program: PathBuf,
+    reference: &str,
+    branch: &str,
+) -> Result<Option<String>, String> {
+    let (remote, _) = remote_of(reference);
+    let listed = gh(
+        gh_program,
+        repo,
+        &[
+            "pr", "list", "--head", branch, "--state", "all", "--json", "url", "--jq", ".[].url",
+        ],
+        "",
+    )?;
+    if !listed.is_empty() {
+        return Ok(Some(listed));
+    }
+    if host_git(
+        repo,
+        &["ls-remote", "--exit-code", "--heads", remote, branch],
+    )
+    .is_ok()
+    {
+        host_git(
+            repo,
+            &["push", "-q", "--no-verify", remote, "--delete", branch],
+        )
+        .map_err(|e| format!("the branch an earlier click pushed was not removed: {e}"))?;
+    }
+    Ok(None)
+}
+
+/// The remote and branch of a default branch's `reference`: `origin` for a local one.
+fn remote_of(reference: &str) -> (&str, &str) {
+    reference.split_once('/').unwrap_or(("origin", reference))
+}
+
+/// A draft PR to open from a temporary worktree of the default branch (#400; First map's, #765).
+pub(crate) struct DraftPr<'a> {
+    /// Daniel's repository: only its refs and its worktree records change, never his checkout or its branch.
+    pub repo: &'a Path,
+    /// plotkeeper's data folder, which holds the temporary worktree.
+    pub data: &'a Path,
+    pub gh: PathBuf,
+    /// The default branch to start from, as [`default_branch_now`] gives it.
+    pub reference: &'a str,
+    /// The new branch, pushed to the default branch's remote.
+    pub branch: &'a str,
+    /// The commit's subject and the PR's title.
+    pub title: &'a str,
+    /// The commit's body.
+    pub message: &'a str,
+    /// The PR's body.
+    pub body: &'a str,
+}
+
+/// Opens `pr` as a draft: a detached temporary worktree of the default branch in the data folder, a branch there, `change` made in it
+/// and staged (it is given the worktree and a temporary folder beside it), a commit with the user's git identity, a push and
+/// `gh pr create --draft`; then the worktree and the local branch are removed. Its answer: what `gh` printed last, the PR's address;
+/// none when `change` says it does not apply, and nothing is pushed.
+pub(crate) fn open_draft(
+    pr: &DraftPr,
+    change: impl FnOnce(&Path, &Path) -> Result<bool, String>,
+) -> Result<Option<String>, String> {
+    let (repo, branch) = (pr.repo, pr.branch);
+    let (remote, base) = remote_of(pr.reference);
+    let tmp = tempfile::Builder::new()
+        .prefix("draft-pr-")
+        .tempdir_in(pr.data)
+        .map_err(|e| format!("the temporary worktree: {e}"))?;
+    let work = tmp.path().join("work");
+    let work_text = work.to_str().ok_or("the path is not text")?.to_string();
+    let made = (|| -> Result<Option<String>, String> {
+        host_git(
+            repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+                &work_text,
+                pr.reference,
+            ],
+        )?;
+        host_git(&work, &["switch", "-q", "-C", branch])?;
+        if !change(&work, tmp.path())? {
+            return Ok(None);
+        }
+        host_git(
+            &work,
+            &[
+                "commit",
+                "-q",
+                "--no-verify",
+                "-m",
+                pr.title,
+                "-m",
+                pr.message,
+            ],
+        )?;
+        host_git(&work, &["push", "-q", "--no-verify", remote, branch])?;
+        gh(
+            pr.gh.clone(),
+            &work,
+            &[
+                "pr",
+                "create",
+                "--draft",
+                "--head",
+                branch,
+                "--base",
+                base,
+                "--title",
+                pr.title,
+                "--body-file",
+                "-",
+            ],
+            pr.body,
+        )
+        .map(Some)
+        .map_err(String::from)
+    })();
+    // The temporary worktree is emptied of what a failed step left and removed by its path, without forcing git and
+    // without pruning, which would drop the records of Daniel's own worktrees whose folders are away.
+    if work.exists() {
+        // Best effort: the `worktree remove` below logs a failure.
+        host_git(&work, &["reset", "-q", "--hard"]).ok();
+        // Best effort: the `worktree remove` below logs a failure.
+        host_git(&work, &["clean", "-fdq"]).ok();
+        if let Err(e) = host_git(repo, &["worktree", "remove", &work_text]) {
+            log::warn!("draft PR: the temporary worktree {work_text} was not removed: {e}");
+        }
+    }
+    drop(tmp);
+    if let Err(e) = host_git(repo, &["branch", "-q", "-D", branch]) {
+        log::warn!("draft PR: the temporary branch {branch} was not deleted: {e}");
+    }
+    made
+}
+
+/// The number of the PR at `url`, the first line of what `gh` printed.
+pub(crate) fn pr_number(url: &str) -> Option<(u64, String)> {
+    let url = url.lines().next().unwrap_or_default().trim().to_string();
+    let number = url
+        .rsplit_once("/pull/")
+        .and_then(|(_, n)| n.trim().parse::<u64>().ok())?;
+    Some((number, url))
 }
 
 /// The text of `law` in `repo`'s map at `reference`, or its id.

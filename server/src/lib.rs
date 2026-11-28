@@ -39,7 +39,9 @@ pub mod learning;
 pub mod lock;
 pub mod map;
 pub mod map_diff;
+pub mod map_draft;
 pub mod map_review;
+pub mod map_scan;
 pub mod micro_worlds;
 pub mod part_catch_ups;
 pub mod pr_briefs;
@@ -156,6 +158,8 @@ pub struct App {
     pub laws: Arc<back_a_law::LawRuns>,
     /// The map text reviews (`map_review.rs`): their runs and the verdicts kept per PR.
     pub reviews: Arc<map_review::MapReviews>,
+    /// First map's Map drafts (`map_draft.rs`): their writers and reviewers, and what they gave, kept per project.
+    pub drafts: Arc<map_draft::MapDrafts>,
     /// The map items each landed commit changed (`ratify::changes_of`).
     changes: ratify::ChangesCache,
     /// Each project's part births (`staleness::births`).
@@ -321,6 +325,15 @@ impl App {
                 reviews.runs_changed(project);
             }
         });
+        let drafts = map_draft::MapDrafts::new(
+            map_draft::Config {
+                store: data.join("first-map"),
+                gh: None,
+            },
+            &runner,
+        );
+        let told = events.clone();
+        drafts.on_change(move |project| told.emit("map-landed", project.into()));
         let laws = back_a_law::LawRuns::new(runner.clone(), back_a_law::Config::beside(log));
         let told = events.clone();
         laws.on_change(move |project| told.emit("map-landed", project.into()));
@@ -354,6 +367,7 @@ impl App {
             worlds,
             laws,
             reviews,
+            drafts,
             changes: Mutex::default(),
             births: Mutex::default(),
         })
@@ -658,6 +672,21 @@ pub fn refresh_landed_tasks(app: &Arc<App>) {
 /// The Map view's payload for `project`: see [`map::map_state`].
 pub fn map_state(app: &Arc<App>, project: String, fetch: bool) -> Result<map::MapState, String> {
     map::map_state(project, fetch, app)
+}
+
+/// Start-up registration (spec #753, "Projects"): adds the project of `folder`, the one a `plotkeeper` started in, and sends the
+/// open pages the saved list; returns the project, as [`projects::Projects::register`] does. A first start calls it in process, a
+/// second through the API with the running server's token. The folder must be absolute: a relative one would be looked up from the
+/// server's own.
+pub fn register_folder(app: &App, folder: &str) -> Result<Option<String>, String> {
+    if !Path::new(folder).is_absolute() {
+        return Err(format!("{folder:?} is not an absolute folder"));
+    }
+    let project = app.projects.register(folder)?;
+    let projects = app.projects.list();
+    app.events
+        .emit("projects", serde_json::to_value(&projects).unwrap());
+    Ok(project)
 }
 
 /// The project header's quiet dot: see [`map::map_marks`].

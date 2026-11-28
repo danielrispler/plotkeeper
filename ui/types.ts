@@ -418,7 +418,8 @@ export type Work = {
   estimate: { range: [number, number] | null; depends_on_you: boolean };
 };
 
-// The Map view's payload (`server/src/map.rs`, `MapState`): one project's map as read from `origin`'s default branch, and Daniel's own
+// The Map view's payload (`server/src/map.rs`, `MapState`): one project's map as read from `origin`'s default branch (or its checkout, or a
+// pending PR, #753), and Daniel's own
 // positions and tiers for it. A feature of the view adds its field here and in `MapState` there; `server/tests/wire.rs` holds
 // the two to agree (#333).
 // What landed since Daniel caught up and what he has read of each PR's brief (`fog.rs`); `UserMap.fog`, which the window does not read.
@@ -441,9 +442,18 @@ type Staleness = { since: number | null; parts: Record<string, { at: number; kin
 export type UserMap = { positions: Record<string, [number, number]>; tiers: Record<string, string>; fog?: FogState; view?: Camera | null; staleness?: Staleness };
 export type MapState = {
   project: string;
-  status: "loaded" | "none" | "unreadable";
+  // "not-git": the project's folder is in no git repository, so there is no map to read or draft.
+  status: "loaded" | "none" | "unreadable" | "not-git";
   // The text of `system-map.json` when it loaded.
   source: string | null;
+  // Where the map was read from (#753): the default branch, else the main checkout's file, else the accepted map waiting on its draft PR;
+  // null when no source has one.
+  from: "default-branch" | "checkout" | "pending-pr" | null;
+  // The draft PR a `pending-pr` map waits on, and whether it closed unmerged; once it closed, where Write to `<path>` puts the map and why
+  // Open a draft PR is muted (`gh` missing or not logged in), null when it is not (#765).
+  pending: { number: number; closed: boolean; path: string; pr_muted: string | null } | null;
+  // For a `checkout` map that reads, the problems `system-map check` finds in the working tree; empty for the others.
+  problems: string[];
   reference: string | null;
   commit: string | null;
   note: string | null;
@@ -550,7 +560,7 @@ export type Expected = { expected: string[]; touched: string[] };
 // it was asked for, started or ended, by its state. An ended run says how it ended in `line`, lists the tool calls it was denied, and
 // carries its `prompt` to copy on every end but a clean one. `paused` is why every queue waits, null while they run.
 type RunEnd = "done" | "denied" | "failed" | "timed-out" | "died" | "setup-failed" | "not-logged-in" | "rate-limited";
-export type RunView = { id: string; kind: "back-law" | "micro-world" | "map-review"; state: "queued" | "running" | "ended"; at: number; outcome: RunEnd | null; line: string | null; warning?: string | null; denials: string[]; prompt: string | null };
+export type RunView = { id: string; kind: "back-law" | "micro-world" | "map-review" | "first-map"; state: "queued" | "running" | "ended"; at: number; outcome: RunEnd | null; line: string | null; warning?: string | null; denials: string[]; prompt: string | null };
 export type Runs = { paused: string | null; runs: RunView[] };
 /** Ratifying (`ratify.rs`): an item of a PR is a map change (kind part, actor, link, law or flow) or a decision the agent declared. */
 export type PendingItem = { pr: number; kind: string; id: string };
@@ -686,6 +696,57 @@ export type PrDiffArgs = { project: string; number: number; head: string; title:
  */
 export type SavedProject = { path: string; gone: boolean; temporary: boolean };
 
+/**
+ * The free scan of a git repository with no map (`server/src/map_scan.rs`, #753): the skeleton map with the computed edges as `import` links, as
+ * text; each part's tracked file count; the languages a reader reads and those none reads yet; whether `claude` was found; the folders that
+ * look like copies, each ticked while the skeleton ignores it; the code files and tests no part owns; and the subfolders each part that can
+ * split would split into (#761).
+ */
+export type MapScan = {
+  map: string;
+  files: Record<string, number>;
+  read_languages: string[];
+  unread_languages: string[];
+  claude: boolean;
+  ignore_candidates: { path: string; ticked: boolean }[];
+  loose_files: string[];
+  loose_tests: string[];
+  splits: Record<string, string[]>;
+};
+
+/** One change of the skeleton on the scan screen (`Edit` in `server/src/map_scan.rs`, #761); `part: null` gives the files a new part. */
+export type ScanEdit =
+  | { kind: "ignore"; folder: string; ignored: boolean }
+  | { kind: "ignore-folder"; folder: string; ignored: boolean }
+  | { kind: "home"; files: string[]; part: string | null }
+  | { kind: "merge"; part: string; into: string }
+  | { kind: "split"; part: string };
+
+/**
+ * First map's Map draft (`server/src/map_draft.rs`, #762): `map`, the skeleton with each part's latest written text and the person's
+ * edits, as text; each writer group (and each Redraft this part) by index, which `map_draft_retry` takes, with its state and why it
+ * failed; the reviewer's verdict on each part's purpose as `map` shows it, by part id; what the writers left out; and `ready`, true once
+ * every group is done, for Accept; `path`, the `system-map.json` Accept writes; and `pr_muted`, why Open a draft PR is muted once Accept
+ * unlocks (`gh` missing or not logged in, #765), null when it is not.
+ */
+export type MapDraftState = "writing" | "checking" | "done" | "writer-failed" | "reviewer-failed";
+export type MapDraft = {
+  map: string;
+  groups: { parts: string[]; state: MapDraftState; why: string | null; redraft: boolean }[];
+  verdicts: Record<string, MapReviewItem>;
+  not_written: { what: string; why: string }[];
+  ready: boolean;
+  path: string;
+  pr_muted: string | null;
+};
+/**
+ * What Accept's Write did (`Accepted` in `server/src/map_draft.rs`, #764): wrote the map to `path`, uncommitted, or wrote nothing since a file
+ * there does not read, for `problem`; Accept again with `replace: seen` replaces that file as it was asked about.
+ */
+export type MapAccepted = { kind: "written"; path: string } | { kind: "replace"; path: string; problem: string; seen: string };
+/** The draft PR Accept's Open a draft PR opened (`OpenedPr` in `server/src/map_draft.rs`, #765): the map waits on it until it merges. */
+export type MapPrOpened = { number: number; url: string };
+
 /** What the page asks at start (#527): plotkeeper's package version, for the toast after an update (`whats-new.ts`). */
 export type About = { version: string };
 /** Why a project header's quiet dot lights (`map.rs`, #386): fog on a Core part, a broken law, a PR brief waiting. */
@@ -759,6 +820,19 @@ export interface Commands {
   };
   map_proof: { args: Project & { law: string }; reply: Proof[] };
   map_state: { args: Project & { fetch: boolean }; reply: MapState };
+  map_scan: { args: Project; reply: MapScan };
+  map_scan_edit: { args: Project & { map: string; edit: ScanEdit }; reply: MapScan };
+  map_draft: { args: Project; reply: MapDraft | null };
+  map_draft_start: { args: Project & { skeleton?: string | null }; reply: MapDraft };
+  map_draft_retry: { args: Project & { group: number }; reply: MapDraft };
+  map_draft_redraft: { args: InPart; reply: MapDraft };
+  map_draft_edit: { args: InPart & { name?: string | null; caption?: string | null; purpose?: string | null; tier?: string | null }; reply: MapDraft };
+  map_draft_discard: { args: Project; reply: void };
+  map_draft_accept: { args: Project & { replace?: string | null }; reply: MapAccepted };
+  map_draft_pr: { args: Project; reply: MapPrOpened };
+  map_pending_write: { args: Project & { replace?: string | null }; reply: MapAccepted };
+  map_pending_pr: { args: Project; reply: MapPrOpened };
+  map_pending_discard: { args: Project; reply: void };
   pr_brief: { args: InPr & { full?: boolean | null }; reply: BriefOpened | null };
   // `older` (#638): "Read the one you have", the stored catch-up of an earlier fog list while it still holds.
   part_catch_up: { args: InPart & { older?: boolean | null }; reply: CatchUpOpened | null };

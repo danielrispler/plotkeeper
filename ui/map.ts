@@ -1,6 +1,6 @@
 // The Map view (spec danielrispler/plotkeeper#306, ticket #309): a project's system map as plates on a quiet chart (Treatment C). Since #386
 // it is the page's base: the page opens on the last viewed project's map, and the session list's headers switch it. The server reads the map from
-// `origin`'s default branch and keeps Daniel's positions (`server/src/map.rs`); `map-model.ts` holds the pure logic.
+// `origin`'s default branch, else the checkout, else a pending PR (#753), and keeps Daniel's positions (`server/src/map.rs`); `map-model.ts` holds the pure logic.
 //
 // Where the next tickets plug in, so they add to this file rather than reshape it:
 // - `onPlate(fn)`: runs for each plate each time it is drawn, with the plate's slots: `fog` behind the name, `marks` at its top
@@ -18,13 +18,16 @@
 //   a PR brief borrows the camera with `lendCamera` and `giveCameraBack` shows Daniel's view again (`cameraRig` in `map-camera.ts`).
 
 import { logStop, reviewNode, reviewOf } from "./stop-rules.js";
-import { element, failure, hint, invoke, keyed, listen, mark, newest, pageStore, pressable, svg, text } from "./dom.js";
+import { availability, confirmed, element, failure, hint, invoke, isUnavailable, keyed, listen, mark, messageOf, newest, pageStore, patch, pressable, svg, text } from "./dom.js";
 import { cameraRig, type CameraRig, fitCamera, panTo, revealPan, zoomAt } from "./map-camera.js";
-import { brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, startProject, switchProject, wasRemoved, parseMap, type Part, type Point, placement, plateSize, plateTitle, sizeOf, lineTag, linkLines, markPoints, readingOrder, rimPoint, type Scrub, tagWord, type Tier } from "./map-model.js";
+import { brokenParts, brokenText, draftPrompt, dragMove, dragStart, effectiveTier, escapeMap, type Drag, type Law, type Layer, type LayerName, type MapDoc, askedProject, startProject, switchProject, wasRemoved, parseMap, type Part, type Point, placement, plateSize, plateTitle, sizeOf, lineTag, linkLines, markPoints, readingOrder, rimPoint, type Scrub, tagWord, type Tier } from "./map-model.js";
 import { copyButton } from "./copy-button.js";
+import { askKeep, drawKeep, startKeep } from "./map-keep.js";
+import { type DraftField, drawDraft, openingWords, replaceAsked } from "./map-draft.js";
+import { drawScan } from "./map-scan.js";
 import { recheckSeen } from "./seen.js";
 import { knownProjects, listedProjects, projectGone } from "./projects.js";
-import type { Camera, MapDiff, MapState } from "./types.js";
+import type { Camera, MapDiff, MapDraft, MapScan, MapState, ScanEdit } from "./types.js";
 
 export type LoadedMap = Extract<MapDoc, { ok: true }>;
 /** What the view holds once a map loaded: its payload, the map as parsed, and every id's centre in the world. */
@@ -79,6 +82,24 @@ let rig: CameraRig | null = null;
 let revealed: string | null = null;
 // The Map diff drawn on today's map (#640): set by a PR brief whose PR changed the map, for the whole brief; a scrub's past map draws without it.
 let diff: MapDiff | null = null;
+// The free scan of `project` while it has no map (#760): asked once per `openMap`, "asking" until it answers, null when it failed. Its
+// skeleton is the one the person edited (#761), each edit's answer replacing it; `note` is why the last edit did not apply, and `edits`
+// chains the edits, so each is sent with the skeleton the one before it left. Draft the map (#763) starts the drafting run (#762) from
+// `scan.map` as the edits leave it; `refused` is why the server refused the last start. `draft` is the project's Map draft, asked with the
+// scan and again on each `map-landed`, "asking" until it answers, null when there is none; `draftNote` is why the last press on it failed.
+type Scanned = {
+  project: string;
+  scan: MapScan | "asking" | null;
+  note: string | null;
+  edits: Promise<void>;
+  refused: string | null;
+  starting: boolean;
+  draft: MapDraft | "asking" | null;
+  draftNote: string | null;
+};
+let scanned: Scanned | null = null;
+// The Map draft's answers, of which only the newest lands, so a slow read never draws over a later press's answer.
+const latestDraft = newest();
 
 /** The map is the page's base (#386): the body carries `map-open` from the start and never loses it. */
 export const mapShown = () => document.body?.classList.contains("map-open") === true;
@@ -108,7 +129,8 @@ async function load(path: string, fetch: boolean) {
   const state = await latest(invoke("map_state", { project: path, fetch }));
   if (!state || path !== project || !mapShown()) return;
   const key = JSON.stringify(state);
-  if (key === drawn && view) return;
+  // A scan screen is kept too, so a focus that changes nothing never resets its panel's scroll (#760).
+  if (key === drawn && (view || element("map-body").querySelector(".map-scan"))) return;
   drawn = key;
   loaded = state;
   draw();
@@ -116,6 +138,13 @@ async function load(path: string, fetch: boolean) {
 
 // The last viewed project, which the page opens on (#386): a per-browser convenience, so a store that throws only loses it.
 const lastViewed = pageStore("project");
+// The project the address asks for (#756), read at the saved list's first arrival; the fragment then leaves the address, so a reload
+// opens on the last viewed.
+function takeAsked(): string | null {
+  const asked = askedProject(location.hash);
+  if (asked !== null) history.replaceState(null, "", location.pathname + location.search);
+  return asked;
+}
 
 /** Shows `path`'s map. */
 export function openMap(path: string | null) {
@@ -128,6 +157,8 @@ export function openMap(path: string | null) {
   loaded = null;
   view = null;
   drawn = "";
+  scanned = null;
+  pendingPress = null;
   // A store that throws keeps nothing: the page opens on the first project instead.
   if (path !== null) lastViewed.set(path);
   // The top bar names the project shown; Treatment C's large title on the map is not drawn, so the name is said once.
@@ -155,7 +186,8 @@ async function showReview(path: string) {
   box.hidden = false;
 }
 
-// The saved project list changed (#381): its first arrival opens the last viewed project, else the first the list shows (`startProject`),
+// The saved project list changed (#381): its first arrival opens the project the address asks for (#756), else the last viewed one, else
+// the first the list shows (`startProject`),
 // unless a selected session's already shows (#386); a fresh install's first project opens when it is added; a shown project that was
 // removed gives way the same way, and one whose folder went or came back is drawn again. `saved` is the list before this change.
 let started = false;
@@ -163,15 +195,16 @@ let saved: string[] = [];
 export function projectsChanged() {
   const first = !started;
   started = true;
+  const asked = first ? takeAsked() : null;
   const [before, now] = [saved, knownProjects()];
   saved = now;
   // A session selected before the list arrived has already shown its project's map.
   if (project === null) {
-    const opening = startProject(lastViewed.get(), now, listedProjects());
+    const opening = startProject([asked, lastViewed.get()], now, listedProjects());
     if (first || opening !== null) openMap(opening);
     return;
   }
-  if (wasRemoved(project, before, now)) return openMap(startProject(null, now, listedProjects()));
+  if (wasRemoved(project, before, now)) return openMap(startProject([], now, listedProjects()));
   if (projectGone(project) !== (element("map-body").querySelector(".map-gone") !== null)) openMap(project);
 }
 
@@ -286,11 +319,135 @@ export function revealParts(ids: string[]) {
 
 const name = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
 
-// The head: the ref the map was read from; the project's name is in the top bar (#386).
+// What the head says of a map not read from the default branch (#753), with its hint; null for the default branch's.
+function fromWords(state: MapState): [string, string] | null {
+  if (state.from === "checkout") return ["Map not committed yet", "This map is the system-map.json in your checkout; it is not on the default branch yet"];
+  if (state.from !== "pending-pr" || !state.pending) return null;
+  const pr = `PR #${state.pending.number}`;
+  return state.pending.closed
+    ? ["Map not in the repo", `${pr} closed without merging, so this map is plotkeeper's copy only`]
+    : [`Map waiting on ${pr}`, `The map you accepted, shown from plotkeeper's copy until ${pr} merges`];
+}
+
+// The head: where the map was read from, the ref for the default branch; the project's name is in the top bar (#386). Then the check's
+// problems of a checkout map (#753).
 function drawHead(state: MapState | null) {
   const ref = element("map-ref");
-  ref.textContent = state?.reference ? `${state.reference}${state.commit ? ` · ${state.commit.slice(0, 7)}` : ""}` : "";
-  hint(ref, state?.note ?? "The branch this map was read from, as last fetched");
+  const from = state ? fromWords(state) : null;
+  if (from) {
+    [ref.textContent] = from;
+    hint(ref, from[1]);
+  } else {
+    ref.textContent = state?.reference ? `${state.reference}${state.commit ? ` · ${state.commit.slice(0, 7)}` : ""}` : "";
+    hint(ref, state?.note ?? "The branch this map was read from, as last fetched");
+  }
+  drawProblems(state?.status === "loaded" ? state.problems : []);
+  drawPending(state);
+  // A folder in no git repository offers no run (#753).
+  element("pre-flight-button").hidden = state?.status === "not-git";
+  // Keep it current (#766): its button while a map is drawn, its card after Accept or when the button asked.
+  drawKeep(element("map-keep"), element("keep-current-button"), state?.project ?? project, state?.status === "loaded");
+}
+
+// The check's problems over a checkout map (#753): the count, the first three and a copy of them all. A draw with the same problems keeps the
+// banner as it is, so its status is not announced again.
+const problemsShown = 3;
+function drawProblems(problems: string[]) {
+  const box = element("map-problems");
+  const key = JSON.stringify(problems);
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  box.hidden = problems.length === 0;
+  if (!problems.length) return box.replaceChildren();
+  const count = `system-map check found ${problems.length} ${problems.length === 1 ? "problem" : "problems"}`;
+  const list = text("ul", "", "map-problems-list");
+  list.append(...problems.slice(0, problemsShown).map((problem) => text("li", problem)));
+  const more = problems.length > problemsShown ? [text("p", `and ${problems.length - problemsShown} more`, "map-problems-more")] : [];
+  const copy = copyButton("Copy all the problems", "Copy every problem the check found, to give to your agent", () => `${count} in system-map.json:\n${problems.map((p) => `- ${p}`).join("\n")}`);
+  const head = text("div", "", "map-problems-head");
+  head.append(text("p", `${count}; the map is drawn as it reads`, "map-problems-title"), copy);
+  box.replaceChildren(head, list, ...more);
+}
+
+// A press on a closed PR's map (#765): which is on its way, its words, and why the last one did not go through.
+type PendingPress = { project: string; busy: "write" | "pr" | "discard" | null; note: string | null };
+let pendingPress: PendingPress | null = null;
+
+// The ways forward of a map whose draft PR closed unmerged (#753, story 28), under the head that says "Map not in the repo": Write to
+// `<path>`, Open a draft PR again and Discard, each answered by reading the map again. A draw with nothing changed keeps the box as it is.
+function drawPending(state: MapState | null) {
+  const box = element("map-pending");
+  const closed = state?.status === "loaded" && state.from === "pending-pr" && state.pending?.closed ? state.pending : null;
+  const press = pendingPress?.project === state?.project ? pendingPress : null;
+  const key = closed ? JSON.stringify([state?.project, closed, press]) : "";
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  box.hidden = !closed;
+  if (!closed || !state) return box.replaceChildren();
+  const asked = state.project;
+  const busy = press?.busy ?? null;
+  box.setAttribute("aria-busy", String(busy !== null));
+  const waiting = busy ? "Wait until the press on its way is done" : null;
+  const folder = closed.path.slice(0, closed.path.lastIndexOf("/")) || closed.path;
+  const write = text("button", "", "btn small primary");
+  write.append("Write system-map.json to ", Object.assign(text("span", folder, "map-drafting-path"), { translate: false }));
+  pressable(write, null, () => {
+    if (!isUnavailable(write)) pressPending(asked, "write", () => writeFile(asked, "map_pending_write"));
+  });
+  write.dataset.key = "pending write";
+  availability(write, `Write ${closed.path} into your checkout, uncommitted, and drop plotkeeper's copy`, waiting);
+  const pr = pressable(text("button", busy === "pr" ? openingWords : "Open a draft PR", "btn small"), null, () => {
+    if (!isUnavailable(pr)) pressPending(asked, "pr", () => invoke("map_pending_pr", { project: asked }));
+  });
+  pr.dataset.key = "pending pr";
+  availability(pr, "Open a new draft PR with this map on a new branch, writing nothing to your checkout", waiting ?? closed.pr_muted);
+  const discard = pressable(text("button", "Discard", "btn small"), null, async () => {
+    if (isUnavailable(discard)) return;
+    const lost = "plotkeeper's copy of the map is deleted, and this repository has no map again: the scan returns, to draft one anew. The closed PR stays on GitHub.";
+    if (await confirmed({ heading: "Discard the accepted map?", lost, verb: "Discard map" })) pressPending(asked, "discard", () => invoke("map_pending_discard", { project: asked }));
+  });
+  discard.dataset.key = "pending discard";
+  availability(discard, "Delete plotkeeper's copy of this map", waiting);
+  const line = text("p", `PR #${closed.number} closed without merging, so this map is only plotkeeper's copy. Keep it in your checkout, open a new draft PR, or discard it.`, "map-pending-line");
+  const actions = text("div", "", "map-pending-actions");
+  actions.setAttribute("role", "group");
+  actions.setAttribute("aria-label", "What to do with the map");
+  actions.dataset.key = "pending actions";
+  actions.append(write, pr, discard);
+  const shown: HTMLElement[] = [line, actions];
+  if (press?.note) {
+    const note = text("p", `That did not go through: ${press.note}. Try it again.`, "map-scan-why");
+    note.setAttribute("role", "status");
+    shown.push(note);
+  }
+  // The box is patched, so the button pressed keeps the focus through its press; another project's box starts anew, as its presses do.
+  if (box.dataset.project !== asked) box.replaceChildren();
+  box.dataset.project = asked;
+  patch(box, shown);
+}
+
+// Runs one press on a closed PR's map, one at a time; once it is done the map is read again, which draws what it left.
+function pressPending(asked: string, busy: NonNullable<PendingPress["busy"]>, run: () => Promise<unknown>) {
+  if (pendingPress?.project === asked && pendingPress.busy) return;
+  const press: PendingPress = { project: asked, busy, note: null };
+  pendingPress = press;
+  draw();
+  void run().then(
+    (done) => {
+      press.busy = null;
+      // A closed PR's Write or new draft PR puts the map in place as Accept does (#766); Discard does not, nor a Write whose replace
+      // question got a no (`writeFile` says false).
+      if (busy !== "discard" && done !== false) askKeep(asked);
+    },
+    (why: unknown) => {
+      failure(`map_pending_${busy}`)(why);
+      [press.busy, press.note] = [null, messageOf(why)];
+    },
+  ).then(() => {
+    if (pendingPress !== press || asked !== project) return;
+    draw();
+    load(asked, false).catch(failure("map"));
+  });
 }
 
 const lawWords = (law: Law) => `${law.backing === "check" ? "Backed by a check" : "On trust"}: ${law.text}`;
@@ -308,10 +465,170 @@ export function linkMark(ids: string[], law: Law, at: Point): SVGElement {
   return mark(diamond, lawWords(law));
 }
 
+// Whether `state`'s project may hold a Map draft: a git repository with no map, or whose checkout system-map.json does not read (#764). The
+// scan is offered only with no map (Q21), but a Map draft already there shows over a broken file, for Write to ask before replacing it.
+const draftable = (state: MapState | null) => state?.status === "none" || (state?.status === "unreadable" && state.from === "checkout");
+
+// The scan screen's scan (#760) for a git repository whose map status is the empty state (no map anywhere): asked the first time it is
+// wanted, with the Map draft, and drawn when it answers; never for a folder in no git repository or a map that does not read, though both
+// are asked for a checkout file that does not read, whose Map draft shows.
+function scanFor(state: MapState | null): MapScan | "asking" | null {
+  if (!draftable(state) || project === null || projectGone(project)) return null;
+  if (scanned?.project !== project) {
+    const asked: Scanned = { project, scan: "asking", note: null, edits: Promise.resolve(), refused: null, starting: false, draft: "asking", draftNote: null };
+    scanned = asked;
+    settleDraft(asked, "map_draft", invoke("map_draft", { project }));
+    const done = (scan: MapScan | null) => {
+      asked.scan = scan;
+      if (scanned === asked && mapShown()) draw();
+    };
+    invoke("map_scan", { project }).then(done, (why: unknown) => {
+      failure("map_scan")(why);
+      done(null);
+    });
+  }
+  return state?.status === "none" ? scanned.scan : null;
+}
+
+// Sends `edit` of the held skeleton to the server, after any edit still on its way, and draws its answer: the plates and lines again, the
+// panel kept (#761). An edit that fails keeps the skeleton and says why.
+function editScan(edit: ScanEdit) {
+  const asked = scanned;
+  if (!asked) return;
+  asked.edits = asked.edits.then(async () => {
+    const now = asked.scan;
+    if (!now || now === "asking") return;
+    // While the server works the edit out, the screen says it is busy.
+    const busy = element("map-body").querySelector(".map-scan");
+    busy?.setAttribute("aria-busy", "true");
+    try {
+      asked.scan = await invoke("map_scan_edit", { project: asked.project, map: now.map, edit });
+      asked.note = null;
+    } catch (why) {
+      failure("map_scan_edit")(why);
+      asked.note = messageOf(why);
+    }
+    busy?.removeAttribute("aria-busy");
+    if (scanned === asked && mapShown()) draw();
+  });
+}
+
+// The Map draft of a project that may hold one, once `scanFor` asked it.
+const draftFor = (state: MapState | null) => (draftable(state) && scanned?.project === project ? scanned.draft : null);
+
+// Draws `request`'s Map draft when it is the newest asked and its project still shows; a failure says why, and a first read that failed
+// leaves the scan.
+function settleDraft(asked: Scanned, command: string, request: Promise<MapDraft | null>) {
+  const drawn = () => {
+    if (scanned === asked && mapShown()) draw();
+  };
+  latestDraft(request).then(
+    (draft) => {
+      if (draft === undefined) return;
+      asked.draft = draft;
+      asked.draftNote = null;
+      drawn();
+    },
+    (why: unknown) => {
+      failure(command)(why);
+      if (asked.draft === "asking") asked.draft = null;
+      else asked.draftNote = messageOf(why);
+      drawn();
+    },
+  );
+}
+
+// Draft the map (#763): after any edit still on its way, the drafting run starts from the skeleton it left; the answer is the Map draft.
+function startDraft() {
+  const asked = scanned;
+  if (!asked || asked.starting) return;
+  asked.starting = true;
+  asked.edits = asked.edits.then(async () => {
+    const now = asked.scan;
+    if (now && now !== "asking") {
+      const busy = element("map-body").querySelector(".map-scan");
+      busy?.setAttribute("aria-busy", "true");
+      try {
+        const draft = await latestDraft(invoke("map_draft_start", { project: asked.project, skeleton: now.map }));
+        if (draft !== undefined) asked.draft = draft;
+        asked.refused = null;
+      } catch (why) {
+        failure("map_draft_start")(why);
+        asked.refused = messageOf(why);
+      }
+      busy?.removeAttribute("aria-busy");
+    }
+    asked.starting = false;
+    if (scanned === asked && mapShown()) draw();
+  });
+}
+
+// The Map draft's presses (#763), each answered with the Map draft as it then stands; Discard's answer is none, which returns to the scan.
+function draftActs(asked: Scanned) {
+  const { project } = asked;
+  return {
+    edit: (part: string, field: DraftField, value: string) => {
+      const fields: Partial<Record<DraftField, string>> = { [field]: value };
+      settleDraft(asked, "map_draft_edit", invoke("map_draft_edit", { project, part, ...fields }));
+    },
+    retry: (group: number) => settleDraft(asked, "map_draft_retry", invoke("map_draft_retry", { project, group })),
+    redraft: (part: string) => settleDraft(asked, "map_draft_redraft", invoke("map_draft_redraft", { project, part })),
+    accept: () => {
+      // One Write at a time: a second press while the first is on its way, or its question is open, does nothing.
+      if (writing) return;
+      writing = true;
+      settleDraft(asked, "map_draft_accept", writeMap(project).finally(() => (writing = false)));
+    },
+    openPr: () => {
+      // One Accept at a time, as Write's; the buttons say a draft PR is being opened until it answers.
+      if (writing) return;
+      [writing, opening] = [true, true];
+      draw();
+      settleDraft(asked, "map_draft_pr", openPr(project).finally(() => ([writing, opening] = [false, false])));
+    },
+    discard: () => settleDraft(asked, "map_draft_discard", invoke("map_draft_discard", { project }).then(() => null)),
+    note: asked.draftNote,
+    opening,
+  };
+}
+
+// Whether a Write or an Open a draft PR is on its way, and which.
+let writing = false;
+let opening = false;
+// Write to `<path>` by `command`, Accept's (#764) or a closed PR's (#765): the map goes into the checkout. A file there that does not read is
+// replaced only on a yes, sent with what the server read of it, so a file changed since is asked about again. True once written.
+async function writeFile(project: string, command: "map_draft_accept" | "map_pending_write"): Promise<boolean> {
+  let reply = await invoke(command, { project });
+  while (reply.kind === "replace") {
+    if (!(await replaceAsked(reply.problem))) return false;
+    reply = await invoke(command, { project, replace: reply.seen });
+  }
+  return true;
+}
+
+// Accept's Write: once written, the map is read again and shows from the checkout, and there is no Map draft; on a no, the Map draft as it
+// stands.
+async function writeMap(project: string): Promise<MapDraft | null> {
+  if (!(await writeFile(project, "map_draft_accept"))) return invoke("map_draft", { project });
+  askKeep(project);
+  await load(project, false);
+  return null;
+}
+
+// Accept's Open a draft PR (#765): once it is open, the map is read again and shows from plotkeeper's copy, waiting on the PR, and there is no
+// Map draft.
+async function openPr(project: string): Promise<MapDraft | null> {
+  await invoke("map_draft_pr", { project });
+  askKeep(project);
+  await load(project, false);
+  return null;
+}
+
 // Where `plotkeeper install` is explained.
 const installDocs = "https://github.com/danielrispler/plotkeeper/blob/main/docs/studio/plugin.md";
 
-// The empty states: a fresh install, a gone folder, a project with no map on its default branch, one whose file does not read, and the wait for the first read.
+// The empty states: a fresh install, a gone folder, a folder in no git repository, a project with no map, one whose file does not read, and the
+// wait for the first read.
 function drawEmpty(body: HTMLElement, state: MapState | null) {
   const box = text("div", "", "map-empty");
   if (project !== null && projectGone(project)) {
@@ -337,6 +654,11 @@ function drawEmpty(body: HTMLElement, state: MapState | null) {
     );
   } else if (state === null) {
     box.append(text("p", "Reading the map…", "empty"));
+  } else if (scanFor(state) === "asking" || (state.status === "none" && draftFor(state) === "asking")) {
+    box.append(text("p", "Scanning this repository's folders…", "empty"));
+  } else if (state.status === "not-git") {
+    // Nothing to read or draft (#753): no prompt and no button.
+    box.append(text("p", "Not a git repository: no map", "map-empty-title"), text("p", `${state.project} is not in a git repository, so it has no map to read or draft.`, "empty"));
   } else if (state.status === "unreadable") {
     box.append(text("p", "This map does not read", "map-empty-title"), text("p", state.note ?? "", "empty"));
   } else {
@@ -634,7 +956,13 @@ function draw() {
   if (loaded && doc?.ok) return drawMap(body, loaded, doc, past, shown);
   view = null;
   const unreadable = loaded && doc && !doc.ok ? { ...loaded, status: "unreadable" as const, note: doc.why } : loaded;
-  drawEmpty(body, unreadable);
+  const scan = scanFor(unreadable);
+  const draft = draftFor(unreadable);
+  // A Map draft shows in the scan's place until it is accepted or discarded (#763).
+  const drafted = unreadable && scanned && draft && draft !== "asking" && drawDraft(body, unreadable, draft, draftActs(scanned));
+  // A scan that failed, or whose map does not read, leaves today's empty screen with its prompt.
+  const acts = { edit: editScan, note: scanned?.note ?? null, draft: startDraft, refused: scanned?.refused ?? null };
+  if (!drafted && (!unreadable || !scan || scan === "asking" || draft === "asking" || !drawScan(body, unreadable, scan, acts))) drawEmpty(body, unreadable);
   const slots = { side: element("map-side"), notPlaced: element("map-not-placed"), tray: element("map-tray"), runs: element("map-runs"), sheet: element("map-sheet"), drawer: element("map-drawer"), banner: element("map-banner") };
   // No map is drawn, so nothing of the last one may stay: its banner, sheet and drawer would belong to another project.
   [slots.notPlaced, slots.tray, slots.runs, slots.sheet, slots.drawer, slots.banner].forEach((slot) => slot.replaceChildren());
@@ -646,6 +974,7 @@ function draw() {
 /** Wires the view: the project menu, the window's focus and a merge the server saw. */
 export function startMap(given: MapDeps) {
   deps = given;
+  startKeep(element("keep-current-button"), () => project, draw);
   element("map-legend").append(
     lawMark({ id: "", on: "", backing: "check", text: "a test stands behind it" }, "legend-check"), " law, backed by a check ",
     lawMark({ id: "", on: "", backing: "trust", text: "nothing checks it" }, "legend-trust"), " law, on trust",
@@ -659,6 +988,9 @@ export function startMap(given: MapDeps) {
     if (mapShown() && project !== null && !projectGone(project)) load(project, true).catch(failure("map"));
   });
   listen<string>("map-landed", (landed) => {
-    if (mapShown() && landed === project) load(landed, false).catch(failure("map"));
+    if (!mapShown() || landed !== project) return;
+    load(landed, false).catch(failure("map"));
+    // A group of the Map draft landed, or a run of it ended (#763): it is read again.
+    if (scanned?.project === landed && scanned.draft !== "asking") settleDraft(scanned, "map_draft", invoke("map_draft", { project: landed }));
   });
 }

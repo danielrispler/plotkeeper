@@ -1,7 +1,7 @@
 // The helpers more than one area's fixtures build on: sessions, the saved projects, the map file and state, the confirm dialog's check,
 // a PR brief's steps and the opened map.
 
-import type { BriefFigure, BriefStep, BriefView, MapState, PrBrief, Session, SessionState, Subagent } from "../../ui/types.ts";
+import type { BriefFigure, BriefStep, BriefView, MapScan, MapState, PrBrief, Session, SessionState, Subagent } from "../../ui/types.ts";
 import { base, type Fixture } from "./base.ts";
 
 export const session = (id: string, name: string, state: SessionState, extra: Partial<Session> = {}): Session => {
@@ -85,9 +85,11 @@ export const mapFile = JSON.stringify({
     { id: "daemon-live", on: "daemon", backing: "check", text: "A terminal outlives the window." },
   ],
 });
+/** The free scan (#760), as `base` answers it, with `extra` changed. */
+export const mapScanOf = (extra: Partial<MapScan> = {}): MapScan => ({ ...base.map_scan, ...extra });
 export const at = (x: number, y: number): [number, number] => [x, y];
 export const mapState = (extra: Partial<MapState> = {}): MapState => ({
-  project: "/w/plotkeeper", status: "loaded", source: mapFile, reference: "origin/main", commit: "35745b1693c5d061e5aea891e98a58515942a12d", note: null,
+  project: "/w/plotkeeper", status: "loaded", source: mapFile, from: "default-branch", pending: null, problems: [], reference: "origin/main", commit: "35745b1693c5d061e5aea891e98a58515942a12d", note: null,
   user: { tiers: {}, positions: { core: at(620, 190), understanding: at(980, 290), plugins: at(300, 430), hook: at(580, 430), shell: at(880, 440), window: at(1180, 560), daemon: at(760, 690), workbench: at(480, 650), agents: at(110, 430), writer: at(1400, 190), github: at(250, 650) } },
   fog: {}, ci: null, ready: [], ratify: [], runs: { paused: null, runs: [] }, stale: {}, stale_why: {}, catch_ups: {},
   ...extra,

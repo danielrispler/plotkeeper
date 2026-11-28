@@ -1,8 +1,8 @@
 // The Map view: its states, fog and marks, the camera, broken laws, the scrubbed history, the base and its projects.
 
-import type { Ci, MapState } from "../../ui/types.ts";
+import type { Ci, MapDraft, MapDraftState, MapReviewItem, MapState } from "../../ui/types.ts";
 import { base, type Fixture } from "./base.ts";
-import { at, briefOf, busyPlace, busySessions, mapBrief, mapFile, mapOpened, mapState, pairFile, panelChecks, session, step, storySteps, withSaved } from "./fixtures-shared.ts";
+import { at, briefOf, busyPlace, busySessions, confirmFirst, mapBrief, mapFile, mapOpened, mapScanOf, mapState, pairFile, panelChecks, session, step, storySteps, withSaved } from "./fixtures-shared.ts";
 
 // The page opens on pokedex, the last viewed project, whose folder is gone: its header is hidden, as it has no live session (spec #659).
 const goneOpened: Fixture = { selected: null, storage: { project: "/w/pokedex" } };
@@ -819,19 +819,601 @@ export const mapFresh = (): Fixture =>
       frame("on a fresh install");
       checkColours("on a fresh install");
       log("base ok");`, { sessions: [], projects: [] });
-/** A project without system-map.json keeps today's draft prompt in the map's place. */
-export const mapNoMap = (): Fixture =>
+/**
+ * A git repository without a map opens on the free scan (#753, ticket #760): its parts as grey plates, each with its folder and file count, no
+ * fog, badges or footprints, the computed import links as lines, the languages line, Draft the map with its time hint, and the copy-prompt that
+ * carries the skeleton. Nothing on it is a colour, and the teaching sentence follows the "no system-map.json" line.
+ */
+export const mapScan = (): Fixture =>
   mapBaseOf(`
-      const draft = document.querySelector("#map .map-empty .map-draft");
-      if (!draft) return log("snap:fail no draft prompt");
-      if (document.querySelector("#map .map-empty.map-fresh")) log("snap:fail the fresh line shows for a project");
-      // The teaching sentence (#526) follows the "no system-map.json" line, and the draft prompt stays.
-      const lines = [...document.querySelectorAll("#map .map-empty .empty")].map((p) => p.textContent);
-      const at = lines.findIndex((line) => line.includes("has no system-map.json"));
-      if (at < 0 || lines[at + 1] !== "A map names your parts and their rules; changes light them up.") log("snap:fail no teaching sentence after the no-map line: " + JSON.stringify(lines));
-      frame("without a map");
-      checkColours("without a map");
-      log("base ok");`, { map_state: mapState({ status: "none", source: null }) });
+      const screen = document.querySelector("#map .map-scan");
+      if (!screen) return log("snap:fail no scan screen: " + document.getElementById("map-body").textContent);
+      if (document.querySelector("#map .map-empty")) log("snap:fail the empty screen shows beside the scan");
+      const plates = [...screen.querySelectorAll(".plate")];
+      if (plates.length !== 3 || plates.some((p) => !p.classList.contains("draft"))) log("snap:fail the scan's plates: " + plates.map((p) => p.className).join(" | "));
+      const lib = screen.querySelector(".plate[data-id=lib]");
+      if (lib?.querySelector(".plate-name")?.textContent !== "Lib" || lib.querySelector(".plate-caption")?.textContent !== "src/lib/ · 30 files") log("snap:fail lib's plate says " + lib?.textContent);
+      if (screen.querySelector(".plate[data-id=cli] .plate-caption")?.textContent !== "src/cli/ · 1 file") log("snap:fail one file is not said so");
+      if (screen.querySelector(".plate-fog, .plate-marks, .plate-chips, .session-badge, .plate.fog-thin, .plate.fog-thick, .plate.foot-firm, .plate.foot-faint")) log("snap:fail a scan plate has fog, a badge or a footprint");
+      const lines = [...screen.querySelectorAll(".map-links line.link")].map((l) => l.dataset.link);
+      if (JSON.stringify(lines) !== JSON.stringify(["app-lib", "cli-lib"])) log("snap:fail the scan's lines: " + JSON.stringify(lines));
+      for (const line of screen.querySelectorAll(".map-links line.link")) if (!(Number(line.getAttribute("x1")) > 0)) log("snap:fail a line is not placed: " + line.outerHTML);
+      // The plates fit the canvas: none is cut by its edge.
+      const area = screen.querySelector(".map-scan-canvas").getBoundingClientRect();
+      for (const plate of plates) {
+        const box = plate.getBoundingClientRect();
+        if (box.left < area.left - 1 || box.right > area.right + 1 || box.top < area.top - 1 || box.bottom > area.bottom + 1) log("snap:fail " + plate.dataset.id + "'s plate is cut by the canvas's edge");
+      }
+      const languages = screen.querySelector(".map-scan-languages")?.textContent;
+      if (languages !== "TypeScript and Go: links computed. Ruby: no reader yet") log("snap:fail the languages line says " + languages);
+      const lines2 = [...screen.querySelectorAll(".empty")].map((p) => p.textContent);
+      const at = lines2.findIndex((line) => line.includes("has no system-map.json"));
+      if (at < 0 || lines2[at + 1] !== "A map names your parts and their rules; changes light them up.") log("snap:fail no teaching sentence after the no-map line: " + JSON.stringify(lines2));
+      const draft = [...screen.querySelectorAll("button")].find((b) => b.textContent === "Draft the map");
+      if (!draft || draft.getAttribute("aria-disabled") === "true") return log("snap:fail Draft the map is missing or muted with claude found");
+      const time = screen.querySelector(".map-scan-time")?.textContent ?? "";
+      if (time !== "About 1 minute · Uses your Claude Code plan") log("snap:fail the time hint says " + JSON.stringify(time));
+      if (screen.textContent.includes("$")) log("snap:fail the scan screen shows a dollar figure");
+      const prompt = screen.querySelector(".map-draft");
+      if (!prompt?.textContent.includes('"src/lib/"') || !prompt.textContent.includes("npx plotkeeper map check")) log("snap:fail the copy-prompt lacks the skeleton or the check: " + prompt?.textContent);
+      if (draft.compareDocumentPosition(prompt) & Node.DOCUMENT_POSITION_PRECEDING) log("snap:fail the copy-prompt leads while claude is found");
+      const copy = screen.querySelector(".copy-icon");
+      if (copy?.getAttribute("aria-label") !== "Copy the prompt") return log("snap:fail the copy-prompt has no copy icon");
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (words) => void (window.__copied = words) } });
+      copy.click();
+      await wait(150);
+      if (window.__copied !== prompt.textContent) log("snap:fail the clipboard holds " + JSON.stringify(window.__copied) + ", not the prompt");
+      // The skeleton's optional edits (#761): the copies to ignore, ticked as the scan set them, and the loose files and tests by folder, each
+      // offered a part or a new part.
+      const checks = [...screen.querySelectorAll(".map-scan-check")].map((row) => [row.textContent, row.querySelector("input[type=checkbox]")?.checked]);
+      if (JSON.stringify(checks) !== JSON.stringify([["reference-copy/", false], ["vendor/", true]])) log("snap:fail the ignore checkboxes: " + JSON.stringify(checks));
+      const legends = [...screen.querySelectorAll(".map-scan-set legend")].map((l) => l.textContent);
+      if (JSON.stringify(legends) !== JSON.stringify(["Copies and vendored code", "Loose files", "Loose tests"])) log("snap:fail the edits' groups: " + JSON.stringify(legends));
+      const rows = [...screen.querySelectorAll(".map-scan-loose")].map((row) => row.querySelector(".map-scan-where").textContent);
+      if (JSON.stringify(rows) !== JSON.stringify(["src/ · index.ts and main.ts", "tests/ · app.test.ts"])) log("snap:fail the loose rows: " + JSON.stringify(rows));
+      const offered = [...(screen.querySelector(".map-scan-loose select")?.options ?? [])].map((o) => o.textContent);
+      if (JSON.stringify(offered) !== JSON.stringify(["A new part", "App", "Cli", "Lib"])) log("snap:fail a loose row offers " + JSON.stringify(offered));
+      for (const pick of screen.querySelectorAll(".map-scan-panel select")) if (!pick.labels?.length) log("snap:fail a select has no label");
+      if (draft.compareDocumentPosition(screen.querySelector(".map-scan-set")) & Node.DOCUMENT_POSITION_FOLLOWING) log("snap:fail the edits come after Draft the map");
+      frame("on the scan");
+      checkColours("on the scan");
+      log("base ok");`, { map_state: mapState({ status: "none", source: null, from: null }), map_scan: mapScanOf() });
+// The base scan with App merged into Lib: Lib holds both folders, and Cli's line to Lib is the one left.
+const mergedScan = (() => {
+  const map = JSON.parse(mapScanOf().map);
+  const lib = map.parts.find((part: { id: string }) => part.id === "lib");
+  lib.paths.push("src/app/");
+  map.parts = map.parts.filter((part: { id: string }) => part.id !== "app");
+  map.links = map.links.filter((link: { from: string }) => link.from !== "app");
+  return JSON.stringify(map);
+})();
+/**
+ * Merge into… on a scan's plate (#753, story 9; ticket #761): App's press opens its actions beside it, with the other parts to merge into and
+ * Split by subfolders muted, as its folder has none. Merging it into Lib sends the held skeleton and the edit; the answer redraws the plates
+ * and lines (Cli's line to Lib alone) while the panel stays open, the same node at the same scroll, and focus lands on Lib's plate. A tick
+ * in the panel then keeps its focus across the redraw.
+ */
+export const mapScanMerge = (): Fixture =>
+  mapBaseOf(`
+    const screen = document.querySelector("#map .map-scan");
+    if (!screen) return log("snap:fail no scan screen");
+    const side = screen.querySelector(".map-scan-panel");
+    side.style.maxBlockSize = "320px";
+    side.scrollTop = 120;
+    const scrolled = side.scrollTop;
+    if (!(scrolled > 0)) log("snap:fail the panel does not scroll, so its scroll is not tested");
+    window.__sent = [];
+    const real = window.fetch;
+    window.fetch = (url, init) => {
+      if (String(url).endsWith("/map_scan_edit")) window.__sent.push(JSON.parse(init.body));
+      return real(url, init);
+    };
+    const app = screen.querySelector(".plate[data-id=app] .plate-open");
+    if (!app) return log("snap:fail App's plate has no button to press");
+    app.click();
+    await wait(100);
+    const menu = screen.querySelector(".map-scan-actions");
+    if (!menu?.matches(":popover-open")) return log("snap:fail App's press opens no actions");
+    if (app.getAttribute("aria-expanded") !== "true") log("snap:fail App's plate does not say its actions are open");
+    const [plateBox, menuBox] = [app.closest(".plate").getBoundingClientRect(), menu.getBoundingClientRect()];
+    if (Math.abs(menuBox.top - plateBox.bottom) > 16 && Math.abs(plateBox.top - menuBox.bottom) > 16) log("snap:fail the actions are not beside App's plate");
+    const options = [...menu.querySelectorAll("select option")].map((o) => o.textContent);
+    if (JSON.stringify(options) !== JSON.stringify(["Cli", "Lib"])) log("snap:fail Merge into offers " + JSON.stringify(options));
+    const split = [...menu.querySelectorAll("button")].find((b) => b.textContent === "Split by subfolders");
+    if (split?.getAttribute("aria-disabled") !== "true") log("snap:fail App's Split by subfolders is not muted, though its folder has no subfolders");
+    split?.click();
+    await wait(50);
+    if (window.__sent.length) log("snap:fail a muted split was sent");
+    frame("with App's actions open");
+    menu.querySelector("select").value = "lib";
+    menu.querySelector("form").requestSubmit();
+    await wait(300);
+    const sent = window.__sent[0];
+    if (sent?.edit?.kind !== "merge" || sent.edit.part !== "app" || sent.edit.into !== "lib" || sent.project !== "/w/plotkeeper" || !sent.map?.includes('"src/app/"')) log("snap:fail the merge sent " + JSON.stringify(sent));
+    if (menu.matches(":popover-open")) log("snap:fail the actions stay open after Merge");
+    const after = document.querySelector("#map .map-scan");
+    if (after !== screen) log("snap:fail the scan screen was drawn anew");
+    if (after.querySelector(".map-scan-panel") !== side) log("snap:fail the panel was drawn anew, not kept open");
+    if (side.scrollTop !== scrolled) log("snap:fail the panel's scroll moved from " + scrolled + " to " + side.scrollTop);
+    const plates = [...after.querySelectorAll(".plate")].map((p) => p.dataset.id);
+    if (JSON.stringify(plates) !== JSON.stringify(["cli", "lib"])) log("snap:fail the plates after the merge: " + JSON.stringify(plates));
+    const lines = [...after.querySelectorAll(".map-links line.link")].map((l) => l.dataset.link);
+    if (JSON.stringify(lines) !== JSON.stringify(["cli-lib"])) log("snap:fail the lines after the merge: " + JSON.stringify(lines));
+    for (const line of after.querySelectorAll(".map-links line.link")) if (!(Number(line.getAttribute("x1")) > 0)) log("snap:fail a line is not placed: " + line.outerHTML);
+    const lib = after.querySelector(".plate[data-id=lib]");
+    if (lib?.querySelector(".plate-caption")?.textContent !== "src/lib/ +1 · 42 files") log("snap:fail Lib's plate says " + lib?.textContent);
+    if (document.activeElement !== lib?.querySelector(".plate-open")) log("snap:fail focus is not on the part merged into, but on " + document.activeElement?.outerHTML.slice(0, 80));
+    if (!side.querySelector(".map-draft")?.textContent.includes('"src/app/"') || side.querySelector(".map-scan-proposes")) log("snap:fail the copy-prompt lost the merged folder");
+    const offered = [...side.querySelector(".map-scan-loose select").options].map((o) => o.textContent);
+    if (JSON.stringify(offered) !== JSON.stringify(["A new part", "Cli", "Lib"])) log("snap:fail a loose row still offers " + JSON.stringify(offered));
+    if (!side.textContent.includes("these 2 parts")) log("snap:fail the panel still counts three parts");
+    frame("after the merge");
+    checkColours("after the merge");
+    // A tick in the panel is sent, and the redraw keeps the box focused.
+    const box = side.querySelector(".map-scan-check input");
+    box.focus();
+    box.click();
+    await wait(300);
+    const tick = window.__sent[1];
+    if (tick?.edit?.kind !== "ignore" || tick.edit.folder !== "reference-copy/" || tick.edit.ignored !== true) log("snap:fail the tick sent " + JSON.stringify(tick));
+    if (document.activeElement !== box || !box.isConnected) log("snap:fail the tick's box lost its focus in the redraw");
+    log("base ok");`, {
+    map_state: mapState({ status: "none", source: null, from: null }),
+    map_scan: mapScanOf(),
+    map_scan_edit: mapScanOf({ map: mergedScan, files: { cli: 1, lib: 42 } }),
+  });
+// The base scan with the loose tests' folder ignored: no loose tests are left, and tests/ is in the skeleton's `ignored`.
+const testsIgnored = (() => {
+  const map = JSON.parse(mapScanOf().map);
+  map.ignored = ["tests/", "vendor/"];
+  return JSON.stringify(map);
+})();
+/**
+ * Ignore on a loose row (#753): each folder's row offers Ignore beside Add, muted with its reason on src/, whose ignoring would take the parts'
+ * files, so its press sends nothing. Ignore on tests/ sends the held skeleton with the edit; the answer leaves no loose tests and lists tests/
+ * under Ignored folders with Unignore, which takes the focus, and whose press sends the edit back.
+ */
+export const mapScanIgnore = (): Fixture =>
+  mapBaseOf(`
+    const screen = document.querySelector("#map .map-scan");
+    if (!screen) return log("snap:fail no scan screen");
+    const side = screen.querySelector(".map-scan-panel");
+    window.__sent = [];
+    const real = window.fetch;
+    window.fetch = (url, init) => {
+      if (String(url).endsWith("/map_scan_edit")) window.__sent.push(JSON.parse(init.body));
+      return real(url, init);
+    };
+    const hintText = (node) => document.getElementById(node?.getAttribute("interestfor") ?? node?.getAttribute("data-hint") ?? "")?.textContent;
+    const ignoreOf = (folder) => [...side.querySelectorAll(".map-scan-loose button")].find((b) => b.textContent === "Ignore" && b.closest(".map-scan-loose").querySelector(".map-scan-where code").textContent === folder);
+    const src = ignoreOf("src/");
+    if (src?.getAttribute("aria-disabled") !== "true") return log("snap:fail src/'s Ignore is missing or not muted, though src/ holds the parts");
+    if (hintText(src) !== "Ignoring src/ would leave out the files of App, Cli and Lib") log("snap:fail src/'s Ignore says " + JSON.stringify(hintText(src)));
+    src.click();
+    await wait(100);
+    if (window.__sent.length) log("snap:fail a muted Ignore was sent");
+    const tests = ignoreOf("tests/");
+    if (!tests || tests.getAttribute("aria-disabled") === "true") return log("snap:fail tests/'s Ignore is missing or muted");
+    if (tests.type !== "button") log("snap:fail Ignore submits its row's form");
+    if (tests.getAttribute("aria-label") !== "Ignore tests/") log("snap:fail tests/'s Ignore is named " + tests.getAttribute("aria-label"));
+    if (side.querySelector(".map-scan-ignored")) log("snap:fail an ignored folder shows before any Ignore");
+    frame("with Ignore on each loose row");
+    checkColours("with Ignore on each loose row");
+    tests.focus();
+    tests.click();
+    await wait(300);
+    const sent = window.__sent[0];
+    if (sent?.edit?.kind !== "ignore-folder" || sent.edit.folder !== "tests/" || sent.edit.ignored !== true || !sent.map?.includes('"src/lib/"')) log("snap:fail the Ignore sent " + JSON.stringify(sent));
+    if (window.__sent.some((call) => call.edit?.kind === "home")) log("snap:fail Ignore gave the files a part");
+    if (document.querySelector("#map .map-scan-panel") !== side) log("snap:fail the panel was drawn anew, not kept open");
+    const legends = [...side.querySelectorAll(".map-scan-set legend")].map((l) => l.textContent);
+    if (JSON.stringify(legends) !== JSON.stringify(["Copies and vendored code", "Loose files", "Ignored folders"])) log("snap:fail the edits' groups after Ignore: " + JSON.stringify(legends));
+    const ignored = [...side.querySelectorAll(".map-scan-ignored")].map((row) => row.textContent);
+    if (JSON.stringify(ignored) !== JSON.stringify(["tests/Unignore"])) log("snap:fail the ignored rows: " + JSON.stringify(ignored));
+    const undo = side.querySelector(".map-scan-ignored button");
+    if (undo?.getAttribute("aria-label") !== "Unignore tests/") log("snap:fail Unignore is named " + undo?.getAttribute("aria-label"));
+    if (document.activeElement !== undo) log("snap:fail focus is not on Unignore, but on " + document.activeElement?.outerHTML.slice(0, 80));
+    if (!side.querySelector(".map-draft")?.textContent.includes('"tests/"')) log("snap:fail the copy-prompt's skeleton does not ignore tests/");
+    frame("after Ignore");
+    checkColours("after Ignore");
+    undo.click();
+    await wait(300);
+    const back = window.__sent[1];
+    if (back?.edit?.kind !== "ignore-folder" || back.edit.folder !== "tests/" || back.edit.ignored !== false || !back.map?.includes('"tests/"')) log("snap:fail the Unignore sent " + JSON.stringify(back));
+    log("base ok");`, {
+    map_state: mapState({ status: "none", source: null, from: null }),
+    map_scan: mapScanOf(),
+    map_scan_edit: mapScanOf({ map: testsIgnored, loose_tests: [] }),
+  });
+/** Draft the map muted when `claude` is not found (#753, story 12): aria-disabled with its one-line reason, a press starts nothing, and the copy-prompt leads. */
+export const mapScanNoClaude = (): Fixture =>
+  mapOpened(`
+    const screen = document.querySelector("#map .map-scan");
+    if (!screen) return log("snap:fail no scan screen");
+    const draft = [...screen.querySelectorAll("button")].find((b) => b.textContent === "Draft the map");
+    if (draft?.getAttribute("aria-disabled") !== "true") return log("snap:fail Draft the map is not muted without claude");
+    const why = screen.querySelector(".map-scan-why")?.textContent ?? "";
+    if (!why.includes("claude")) log("snap:fail the muted button gives no reason: " + JSON.stringify(why));
+    const prompt = screen.querySelector(".map-draft");
+    if (!prompt || !(draft.compareDocumentPosition(prompt) & Node.DOCUMENT_POSITION_PRECEDING)) log("snap:fail the copy-prompt does not lead without claude");
+    log("no claude ok");`, { map_state: mapState({ status: "none", source: null, from: null }), map_scan: mapScanOf({ claude: false }) });
+/**
+ * The layout follows the payload while the Map view stays open (#760): a repository with no map shows a quiet line while its scan runs, then the
+ * scan screen; once a map appears (the user's agent wrote it into the checkout), the window's focus draws the map, and the scan is gone.
+ */
+export const mapScanSwitch = (): Fixture =>
+  mapOpened(`
+    const body = document.getElementById("map-body");
+    if (!body.textContent.includes("Scanning")) log("snap:fail no line while the scan runs: " + body.textContent);
+    if (body.querySelector(".map-scan")) log("snap:fail the scan screen shows before its scan");
+    await wait(1500);
+    if (!body.querySelector(".map-scan .plate.draft")) return log("snap:fail the scan did not draw once it came: " + body.textContent);
+    if (!document.getElementById("map-legend").hidden) log("snap:fail the map's legend shows on the scan");
+    const fetched = window.fetch;
+    window.fetch = async (url, init) => {
+      if (!String(url).endsWith("/api/map_state")) return fetched(url, init);
+      return { ok: true, status: 200, json: async () => (${JSON.stringify(mapState({ from: "checkout" }))}) };
+    };
+    window.dispatchEvent(new Event("focus"));
+    await wait(400);
+    if (body.querySelector(".map-scan, .plate.draft")) log("snap:fail the scan stays once a map appears");
+    if (!body.querySelector(".map-canvas .plate[data-id=shell]")) log("snap:fail the map that appeared is not drawn");
+    if (document.getElementById("map-ref").textContent !== "Map not committed yet") log("snap:fail the head says " + document.getElementById("map-ref").textContent);
+    log("switch ok");`, { map_state: mapState({ status: "none", source: null, from: null }), map_scan: { __delay: 3500, value: mapScanOf() } as never, budget: 9000, snapDone: "switch ok" });
+// First map's Map draft (#753, stories 14-22; ticket #763) on the base scan's three parts. `written` is what the writers gave each part,
+// `draftOf` a draft whose map shows the texts of `landed` (the parts whose writer answered) and `edits`, and `group` one writer group.
+const written: Record<string, { name: string; caption: string; purpose: string }> = {
+  app: { name: "App shell", caption: "Draws the window", purpose: "Draws the window and routes its keys to the commands." },
+  cli: { name: "Command line", caption: "Parses the flags", purpose: "Parses the flags and starts the app with them." },
+  lib: { name: "Store", caption: "Reads and writes the store", purpose: "Reads and writes the store on disk, one file a record." },
+};
+const draftOf = (landed: string[], extra: Partial<MapDraft> = {}, edits: Record<string, Record<string, string>> = {}): MapDraft => {
+  const map = JSON.parse(mapScanOf().map);
+  for (const part of map.parts) Object.assign(part, landed.includes(part.id) ? written[part.id] : {}, edits[part.id] ?? {});
+  return { map: JSON.stringify(map), groups: [], verdicts: {}, not_written: [], ready: false, path: "/w/plotkeeper/system-map.json", pr_muted: null, ...extra };
+};
+const group = (parts: string[], state: MapDraftState, why: string | null = null, redraft = false) => ({ parts, state, why, redraft });
+const verdict = (id: string, flag: MapReviewItem["verdict"] = "supported", why = "", cites: string[] = []): MapReviewItem => ({ id: `part:${id}/purpose`, verdict: flag, why, cites, flagged: flag !== "supported" });
+const checked = { app: verdict("app"), lib: verdict("lib") };
+const flagged = { ...checked, cli: verdict("cli", "overreach", "It parses the flags, but the app is started by src/app/main.ts, not here.", ["src/cli/args.ts:12-30", "src/app/main.ts:4-9"]) };
+// The review screen: every reviewer answered, Cli's purpose flagged.
+const reviewDraft = draftOf(["app", "cli", "lib"], { groups: [group(["app"], "done"), group(["cli"], "done"), group(["lib"], "done")], verdicts: flagged, ready: true });
+// `answer` sets what a command answers from here on, past the fixture's own reply; `sent` holds each command the page sent, with its arguments.
+// `hintText` is a button's hint.
+const draftHarness = `
+    const hintText = (node) => document.getElementById(node?.getAttribute("interestfor") ?? node?.getAttribute("data-hint") ?? "")?.textContent;
+    const sent = [];
+    const answers = {};
+    const answer = (command, reply) => void (answers[command] = reply);
+    const real = window.fetch;
+    window.fetch = async (url, init) => {
+      const command = /\\/api\\/(\\w+)$/.exec(String(url))?.[1];
+      sent.push([command, init?.body ? JSON.parse(init.body) : null]);
+      if (command in answers) return { ok: true, status: 200, json: async () => answers[command] };
+      return real(url, init);
+    };
+    const sentOf = (command) => sent.filter(([c]) => c === command).map(([, args]) => args);
+    const card = (id) => document.querySelector('#map .map-drafting-part[data-id="' + id + '"]');
+    const field = (id, name) => card(id)?.querySelector('[name="' + name + '"]');
+    const plate = (id) => document.querySelector('#map .map-drafting .plate[data-id="' + id + '"]');
+    const button = (root, words) => [...(root?.querySelectorAll("button") ?? [])].find((b) => b.textContent === words);
+    const accept = () => document.querySelector('#map .map-drafting-panel [data-key="draft accept"]');
+    const land = async (draft) => {
+      answer("map_draft", draft);
+      __snapEmit("map-landed", "/w/plotkeeper");
+      await wait(300);
+    };`;
+/**
+ * The layout steps while the Map view stays open (#753, stories 14-18 and 21): Draft the map waits for an edit still on its way and sends the
+ * skeleton it left; the scan gives way to the Map draft, every plate being written and Accept locked. The plates then fill in as groups land
+ * (`map-landed`), each the same node, "being checked" until its reviewer answers; a failed group says why and offers Retry of it alone. A
+ * caption being typed keeps its words and its focus while another group lands, and is kept in the Map draft once committed, as is a tier.
+ * Accept unlocks once every reviewer answered.
+ */
+export const mapDraftSteps = (): Fixture =>
+  mapOpened(`
+    ${draftHarness}
+    const body = document.getElementById("map-body");
+    const scan = body.querySelector(".map-scan");
+    if (!scan || scan.classList.contains("map-drafting")) return log("snap:fail the scan does not show first: " + body.textContent.replace(/\\s+/g, " ").slice(0, 200));
+    // An edit on its way when Draft the map is pressed: the draft starts from the skeleton it leaves.
+    scan.querySelector(".map-scan-check input").click();
+    button(scan, "Draft the map").click();
+    await wait(800);
+    const order = sent.map(([c]) => c).filter((c) => c === "map_scan_edit" || c === "map_draft_start");
+    if (JSON.stringify(order) !== JSON.stringify(["map_scan_edit", "map_draft_start"])) log("snap:fail Draft the map did not wait for the edit: " + JSON.stringify(order));
+    const started = sentOf("map_draft_start")[0];
+    if (started?.project !== "/w/plotkeeper" || !JSON.parse(started.skeleton ?? "{}").ignored?.includes("reference-copy/")) log("snap:fail Draft the map sent " + JSON.stringify(started));
+    const screen = body.querySelector(".map-scan.map-drafting");
+    if (!screen) return log("snap:fail the Map draft does not show after Draft the map: " + body.textContent.replace(/\\s+/g, " ").slice(0, 200));
+    if (body.querySelector(".map-scan-check, .map-scan-prompt")) log("snap:fail the scan's edits stay on the Map draft");
+    if (!document.getElementById("map-legend").hidden) log("snap:fail the map's legend shows on the Map draft");
+    const states = () => ["app", "cli", "lib"].map((id) => plate(id)?.querySelector(".plate-state")?.textContent ?? "none");
+    if (JSON.stringify(states()) !== JSON.stringify(["Being written…", "Being written…", "Being written…"])) log("snap:fail the plates being written say " + JSON.stringify(states()));
+    if (!field("app", "name")?.readOnly) log("snap:fail a part being written can be edited");
+    if (accept()?.getAttribute("aria-disabled") !== "true") log("snap:fail Accept is not locked while the parts are written");
+    const appPlate = plate("app");
+    // App's group lands, being checked; Lib's writer failed.
+    await land(${JSON.stringify(draftOf(["app"], { groups: [group(["app"], "checking"), group(["cli"], "writing"), group(["lib"], "writer-failed", "The writer timed out after 10 minutes.")] }))});
+    if (plate("app") !== appPlate) log("snap:fail App's plate was drawn anew, not patched");
+    if (plate("app")?.querySelector(".plate-name")?.textContent !== "App shell" || plate("app")?.querySelector(".plate-caption")?.textContent !== "Draws the window") log("snap:fail App's plate says " + plate("app")?.textContent);
+    if (JSON.stringify(states()) !== JSON.stringify(["Being checked", "Being written…", "Writing failed"])) log("snap:fail the plates say " + JSON.stringify(states()));
+    if (field("app", "name")?.value !== "App shell" || field("app", "name")?.readOnly) log("snap:fail App's landed name is not there to edit");
+    const failed = document.querySelector("#map .map-drafting-failed");
+    if (!failed?.textContent.includes("The writer timed out after 10 minutes.")) log("snap:fail the failed group does not say why: " + failed?.textContent);
+    answer("map_draft_retry", ${JSON.stringify(draftOf(["app"], { groups: [group(["app"], "checking"), group(["cli"], "writing"), group(["lib"], "writing")] }))});
+    button(failed, "Retry")?.click();
+    await wait(300);
+    if (JSON.stringify(sentOf("map_draft_retry")) !== JSON.stringify([{ project: "/w/plotkeeper", group: 2 }])) log("snap:fail Retry sent " + JSON.stringify(sentOf("map_draft_retry")));
+    // A caption being typed in App's card while Cli's group lands keeps its words and its focus.
+    const caption = field("app", "caption");
+    caption.focus();
+    caption.value = "Draws the whole window";
+    await land(${JSON.stringify(draftOf(["app", "cli"], { groups: [group(["app"], "done"), group(["cli"], "checking"), group(["lib"], "writing")], verdicts: { app: verdict("app") } }))});
+    if (document.activeElement !== caption || !caption.isConnected) log("snap:fail the caption being typed lost its focus when a group landed");
+    if (caption.value !== "Draws the whole window") log("snap:fail the caption being typed was replaced by " + JSON.stringify(caption.value));
+    if (field("cli", "name")?.value !== "Command line") log("snap:fail Cli's landed name is not in its card");
+    if (sentOf("map_draft_edit").length) log("snap:fail an edit was sent before it was committed");
+    // Committed, it is kept in the Map draft: only the caption is sent.
+    answer("map_draft_edit", ${JSON.stringify(draftOf(["app", "cli"], { groups: [group(["app"], "done"), group(["cli"], "checking"), group(["lib"], "writing")], verdicts: { app: verdict("app") } }, { app: { caption: "Draws the whole window" } }))});
+    caption.dispatchEvent(new Event("change", { bubbles: true }));
+    await wait(300);
+    if (JSON.stringify(sentOf("map_draft_edit")) !== JSON.stringify([{ project: "/w/plotkeeper", part: "app", caption: "Draws the whole window" }])) log("snap:fail the caption's edit sent " + JSON.stringify(sentOf("map_draft_edit")));
+    if (plate("app")?.querySelector(".plate-caption")?.textContent !== "Draws the whole window") log("snap:fail App's plate does not show the edited caption");
+    const tier = field("app", "tier");
+    if (tier?.value !== "interface") log("snap:fail App does not start as Interface: " + tier?.value);
+    tier.value = "core";
+    tier.dispatchEvent(new Event("change", { bubbles: true }));
+    await wait(300);
+    if (JSON.stringify(sentOf("map_draft_edit")[1]) !== JSON.stringify({ project: "/w/plotkeeper", part: "app", tier: "core" })) log("snap:fail the tier's edit sent " + JSON.stringify(sentOf("map_draft_edit")[1]));
+    if (accept()?.getAttribute("aria-disabled") !== "true") log("snap:fail Accept unlocked before every reviewer answered");
+    await land(${JSON.stringify(reviewDraft)});
+    if (body.querySelector(".map-drafting") !== screen) log("snap:fail the Map draft was drawn anew");
+    if (accept()?.hasAttribute("aria-disabled")) log("snap:fail Accept stays locked once every reviewer answered");
+    log("draft steps ok");`, { map_state: mapState({ status: "none", source: null, from: null }), map_scan_edit: { __delay: 300, value: mapScanOf({ map: JSON.stringify({ ...JSON.parse(mapScanOf().map), ignored: ["reference-copy/"] }), ignore_candidates: [{ path: "reference-copy/", ticked: true }, { path: "vendor/", ticked: true }] }) } as never, map_draft_start: draftOf([], { groups: [group(["app"], "writing"), group(["cli"], "writing"), group(["lib"], "writing")] }), budget: 9000, snapDone: "draft steps ok" });
+/**
+ * Drafting (#753, stories 14-16): App's group in and checked, Cli's being checked, Lib's writer failed with why and Retry, Accept locked;
+ * the progress line counts the parts.
+ */
+export const mapDrafting = (): Fixture =>
+  mapBaseOf(`
+    const screen = document.querySelector("#map .map-scan.map-drafting");
+    if (!screen) return log("snap:fail no Map draft: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    const states = ["app", "cli", "lib"].map((id) => screen.querySelector('.plate[data-id="' + id + '"] .plate-state')?.textContent);
+    if (JSON.stringify(states) !== JSON.stringify(["Checked", "Being checked", "Writing failed"])) log("snap:fail the plates say " + JSON.stringify(states));
+    const progress = screen.querySelector(".map-drafting-progress")?.textContent;
+    if (progress !== "1 of 3 parts checked · 1 being checked · 1 failed") log("snap:fail the progress line says " + JSON.stringify(progress));
+    const failed = screen.querySelector(".map-drafting-failed");
+    if (!failed?.textContent.includes("Store") && !failed?.textContent.includes("Lib")) log("snap:fail the failed group does not name its part: " + failed?.textContent);
+    if (!failed?.textContent.includes("rate limit")) log("snap:fail the failed group does not say why");
+    const ways = ["draft accept", "draft pr"].map((key) => screen.querySelector('[data-key="' + key + '"]')?.getAttribute("aria-disabled"));
+    if (JSON.stringify(ways) !== JSON.stringify(["true", "true"])) log("snap:fail Accept's ways out are not locked while drafting: " + JSON.stringify(ways));
+    for (const pick of screen.querySelectorAll("input, textarea, select")) if (!pick.labels?.length) log("snap:fail a field has no label: " + pick.name);
+    frame("while drafting");
+    checkColours("while drafting");
+    log("base ok");`, {
+    map_state: mapState({ status: "none", source: null, from: null }),
+    map_draft: draftOf(["app", "cli"], { groups: [group(["app"], "done"), group(["cli"], "checking"), group(["lib"], "writer-failed", "The writer hit the rate limit; it will retry after Resume.")], verdicts: { app: verdict("app") } }),
+  });
+/**
+ * The review screen (#753, stories 19 and 21): Cli's flagged purpose shows its verdict, its reason and the lines it cites, without locking
+ * Accept; every part starts Interface, with the Core line and a tier picker on each part.
+ */
+export const mapDraftReview = (): Fixture =>
+  mapBaseOf(`
+    const screen = document.querySelector("#map .map-scan.map-drafting");
+    if (!screen) return log("snap:fail no Map draft: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    const flag = screen.querySelector('.map-drafting-part[data-id="cli"] .map-drafting-flag');
+    if (!flag?.textContent.includes("overreach") || !flag.textContent.includes("not here") || !flag.textContent.includes("src/cli/args.ts:12-30") || !flag.textContent.includes("src/app/main.ts:4-9")) log("snap:fail Cli's flag says " + flag?.textContent);
+    if (screen.querySelector('.map-drafting-part[data-id="app"] .map-drafting-flag')) log("snap:fail a supported purpose shows a flag");
+    if (!screen.querySelector('.plate[data-id="cli"]')?.classList.contains("flagged")) log("snap:fail Cli's plate is not marked flagged");
+    const core = screen.querySelector(".map-drafting-core")?.textContent;
+    if (core !== "Mark the parts you work in as Core: they'll tell you when they change.") log("snap:fail the Core line says " + JSON.stringify(core));
+    const tiers = [...screen.querySelectorAll('select[name="tier"]')].map((pick) => pick.value);
+    if (JSON.stringify(tiers) !== JSON.stringify(["interface", "interface", "interface"])) log("snap:fail the tiers start as " + JSON.stringify(tiers));
+    const offered = [...(screen.querySelector('select[name="tier"]')?.options ?? [])].map((o) => o.textContent);
+    if (JSON.stringify(offered) !== JSON.stringify(["Core", "Interface", "Black box"])) log("snap:fail a tier picker offers " + JSON.stringify(offered));
+    const accept = screen.querySelector('[data-key="draft accept"]');
+    if (!accept || accept.hasAttribute("aria-disabled")) log("snap:fail a flag locks Accept");
+    for (const pick of screen.querySelectorAll("input, textarea, select")) if (!pick.labels?.length) log("snap:fail a field has no label: " + pick.name);
+    // The picture shows the flag: the panel scrolls to it.
+    flag.scrollIntoView({ block: "center" });
+    frame("on the review screen");
+    checkColours("on the review screen");
+    log("base ok");`, { map_state: mapState({ status: "none", source: null, from: null }), map_draft: reviewDraft });
+/**
+ * Redraft this part and Discard (#753, stories 20 and 22), from a Map draft kept across a restart: Redraft relocks Accept until that part's
+ * reviewer answers, its plate being redrafted and its Redraft muted meanwhile; Discard asks first, then returns to the scan.
+ */
+export const mapDraftRedraft = (): Fixture =>
+  mapOpened(`
+    ${draftHarness}
+    if (!document.querySelector("#map .map-drafting")) return log("snap:fail a kept Map draft does not show on open: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    if (accept()?.hasAttribute("aria-disabled")) log("snap:fail Accept is locked on a checked draft");
+    button(card("cli"), "Redraft this part")?.click();
+    await wait(300);
+    if (JSON.stringify(sentOf("map_draft_redraft")) !== JSON.stringify([{ project: "/w/plotkeeper", part: "cli" }])) log("snap:fail Redraft sent " + JSON.stringify(sentOf("map_draft_redraft")));
+    if (accept()?.getAttribute("aria-disabled") !== "true") log("snap:fail Accept stays unlocked after Redraft this part");
+    if (plate("cli")?.querySelector(".plate-state")?.textContent !== "Being redrafted…") log("snap:fail Cli's plate says " + plate("cli")?.textContent);
+    if (button(card("cli"), "Redraft this part")?.getAttribute("aria-disabled") !== "true") log("snap:fail Redraft is not muted while the part is redrafted");
+    await land(${JSON.stringify(draftOf(["app", "cli", "lib"], { groups: [group(["app"], "done"), group(["cli"], "done"), group(["lib"], "done"), group(["cli"], "checking", null, true)], verdicts: checked }))});
+    if (accept()?.getAttribute("aria-disabled") !== "true") log("snap:fail Accept unlocked before the redrafted part was checked");
+    await land(${JSON.stringify(draftOf(["app", "cli", "lib"], { groups: [group(["app"], "done"), group(["cli"], "done"), group(["lib"], "done"), group(["cli"], "done", null, true)], verdicts: { ...checked, cli: verdict("cli") }, ready: true }))});
+    if (accept()?.hasAttribute("aria-disabled")) log("snap:fail Accept stays locked once the redrafted part was checked");
+    answer("map_draft", null);
+    ${confirmFirst(`button(document.querySelector("#map .map-drafting-panel"), "Discard")?.click()`, "map_draft_discard", "Discard draft", ["Map draft"])}
+    await wait(300);
+    const back = document.querySelector("#map .map-scan");
+    if (!back || back.classList.contains("map-drafting") || !back.querySelector(".plate.draft")) log("snap:fail Discard did not return to the scan: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    log("draft redraft ok");`, {
+    map_state: mapState({ status: "none", source: null, from: null }),
+    map_draft: reviewDraft,
+    map_draft_redraft: draftOf(["app", "cli", "lib"], { groups: [group(["app"], "done"), group(["cli"], "done"), group(["lib"], "done"), group(["cli"], "writing", null, true)], verdicts: checked }),
+    budget: 9000,
+    snapDone: "draft redraft ok",
+  });
+/**
+ * Accept's two ways out (#753, stories 23 and 26; tickets #764 and #765) once every reviewer answered: Write system-map.json to the checkout's
+ * path, with the line saying it adds an uncommitted file like a CLAUDE.md, and Open a draft PR, open to press while `gh` is logged in.
+ */
+export const mapDraftAccept = (): Fixture =>
+  mapBaseOf(`
+    const screen = document.querySelector("#map .map-scan.map-drafting");
+    if (!screen) return log("snap:fail no Map draft: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    const actions = screen.querySelector(".map-drafting-actions");
+    if (actions?.getAttribute("role") !== "group" || !actions.getAttribute("aria-label")) log("snap:fail Accept's ways out are not a named group");
+    const write = actions?.querySelector('[data-key="draft accept"]');
+    if (write?.textContent !== "Write system-map.json to /w/plotkeeper") log("snap:fail Write says " + JSON.stringify(write?.textContent));
+    if (!write || write.hasAttribute("aria-disabled")) log("snap:fail Write is muted on a checked draft");
+    const line = actions?.querySelector(".map-drafting-uncommitted")?.textContent ?? "";
+    if (!line.includes("uncommitted") || !line.includes("CLAUDE.md")) log("snap:fail the line under Write says " + JSON.stringify(line));
+    const pr = [...actions.querySelectorAll("button")].find((b) => b.textContent === "Open a draft PR");
+    if (!pr || pr.hasAttribute("aria-disabled")) log("snap:fail Open a draft PR is muted with gh logged in");
+    const order = [...actions.querySelectorAll("button")].map((b) => b.dataset.key);
+    if (JSON.stringify(order) !== JSON.stringify(["draft accept", "draft pr", "draft discard"])) log("snap:fail the ways out come in the order " + JSON.stringify(order));
+    frame("with Accept's ways out");
+    checkColours("with Accept's ways out");
+    log("base ok");`, { map_state: mapState({ status: "none", source: null, from: null }), map_draft: reviewDraft });
+// Why Open a draft PR is muted when `gh` is not logged in, as the server says it.
+const ghLoggedOut = "`gh` is not logged in: run `gh auth login` to open a draft PR, or write the file instead";
+/** Open a draft PR muted with its reason when `gh` is not logged in (#753, story 27): a press sends nothing, and Write stays the way out. */
+export const mapDraftPrMuted = (): Fixture =>
+  mapOpened(`
+    ${draftHarness}
+    const pr = document.querySelector('#map .map-drafting [data-key="draft pr"]');
+    if (!pr) return log("snap:fail no Open a draft PR: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    if (pr.getAttribute("aria-disabled") !== "true") log("snap:fail Open a draft PR is not muted with gh logged out");
+    if (hintText(pr) !== ${JSON.stringify(ghLoggedOut)}) log("snap:fail the muted button's hint says " + JSON.stringify(hintText(pr)));
+    pr.click();
+    await wait(200);
+    if (sentOf("map_draft_pr").length) log("snap:fail a muted Open a draft PR reached the server");
+    if (document.querySelector('#map [data-key="draft accept"]')?.hasAttribute("aria-disabled")) log("snap:fail Write is muted too");
+    log("draft pr muted ok");`, {
+    map_state: mapState({ status: "none", source: null, from: null }),
+    map_draft: { ...reviewDraft, pr_muted: ghLoggedOut },
+    snapDone: "draft pr muted ok",
+  });
+/**
+ * Open a draft PR's steps (#753, story 26): while it is on its way the button says so and both ways out wait; once it answers, the map shows
+ * from plotkeeper's copy with "Map waiting on PR #7" in its head, no Map draft and no ways forward of a closed PR.
+ */
+export const mapDraftPr = (): Fixture =>
+  mapOpened(`
+    ${draftHarness}
+    const pr = () => document.querySelector('#map .map-drafting [data-key="draft pr"]');
+    if (!pr()) return log("snap:fail no Open a draft PR: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    pr().click();
+    await wait(300);
+    if (pr()?.textContent !== "Opening the draft PR…") log("snap:fail the button says " + JSON.stringify(pr()?.textContent) + " while the PR opens");
+    if (document.querySelector('#map [data-key="draft accept"]')?.getAttribute("aria-disabled") !== "true") log("snap:fail Write is not muted while the PR opens");
+    if (document.querySelector("#map .map-drafting-actions")?.getAttribute("aria-busy") !== "true") log("snap:fail the ways out are not busy while the PR opens");
+    pr().click();
+    if (sentOf("map_draft_pr").length !== 1) log("snap:fail a second press sent Open a draft PR again: " + sentOf("map_draft_pr").length);
+    answer("map_state", ${JSON.stringify(pendingState(false))});
+    answer("map_draft", null);
+    await wait(1600);
+    if (JSON.stringify(sentOf("map_draft_pr")) !== JSON.stringify([{ project: "/w/plotkeeper" }])) log("snap:fail Open a draft PR sent " + JSON.stringify(sentOf("map_draft_pr")));
+    if (document.querySelector("#map .map-drafting, #map .map-scan")) log("snap:fail the Map draft stays once the PR is open");
+    if (!document.querySelector("#map .map-canvas .plate[data-id=shell]")) log("snap:fail the map waiting on its PR is not drawn: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    if (document.getElementById("map-ref").textContent !== "Map waiting on PR #7") log("snap:fail the head says " + document.getElementById("map-ref").textContent);
+    if (!document.getElementById("map-pending").hidden) log("snap:fail a closed PR's ways forward show while it is open");
+    log("draft pr ok");`, {
+    map_state: mapState({ status: "none", source: null, from: null }),
+    map_draft: reviewDraft,
+    map_draft_pr: { __delay: 1200, value: { number: 7, url: "https://github.com/someone/plotkeeper/pull/7" } } as never,
+    budget: 9000,
+    snapDone: "draft pr ok",
+  });
+// A checkout system-map.json that does not read, with a Map draft kept from before it came: its first problem, as the Map view says it.
+const brokenFile = "expected `,` or `}` at line 1 column 13";
+/**
+ * The replace question (#753, story 25): with a system-map.json in the checkout that does not read, the Map draft still shows, and Write asks
+ * before replacing the file, naming its first problem, Cancel focused.
+ */
+export const mapDraftReplace = (): Fixture =>
+  mapBaseOf(`
+    const screen = document.querySelector("#map .map-scan.map-drafting");
+    if (!screen) return log("snap:fail a Map draft does not show over a checkout file that does not read: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    screen.querySelector('[data-key="draft accept"]').click();
+    await wait(400);
+    const dialog = document.getElementById("confirm-dialog");
+    if (!dialog.matches(":modal")) return log("snap:fail Write did not ask before replacing the file");
+    if (document.getElementById("confirm-heading").textContent !== "Replace system-map.json?") log("snap:fail the question is " + document.getElementById("confirm-heading").textContent);
+    if (!dialog.textContent.includes(${JSON.stringify(brokenFile)})) log("snap:fail the question does not name the file's problem: " + dialog.textContent.replace(/\\s+/g, " "));
+    if (document.getElementById("confirm-yes").textContent !== "Replace it") log("snap:fail the yes says " + document.getElementById("confirm-yes").textContent);
+    if (document.activeElement?.textContent !== "Cancel") log("snap:fail Cancel is not focused but " + document.activeElement?.textContent);
+    checkColours("with the replace question");
+    log("base ok");`, {
+    map_state: mapState({ status: "unreadable", source: null, from: "checkout", note: "system-map.json does not read: " + brokenFile }),
+    map_draft: reviewDraft,
+    map_draft_accept: { kind: "replace", path: "/w/plotkeeper/system-map.json", problem: brokenFile, seen: "00c0ffee00c0ffee" },
+  });
+/**
+ * Write's steps (#753, stories 24 and 25): a no to the replace question writes nothing and keeps the Map draft; a yes sends what the server
+ * read of the file, and once written the map shows from the checkout, "Map not committed yet" in its head, with no Map draft and no PR button.
+ */
+export const mapDraftWrite = (): Fixture =>
+  mapOpened(`
+    ${draftHarness}
+    const replace = { kind: "replace", path: "/w/plotkeeper/system-map.json", problem: ${JSON.stringify(brokenFile)}, seen: "00c0ffee00c0ffee" };
+    answer("map_draft_accept", replace);
+    const dialog = document.getElementById("confirm-dialog");
+    if (!accept()) return log("snap:fail no Write on the Map draft: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    accept().click();
+    await wait(300);
+    if (!dialog.matches(":modal")) return log("snap:fail Write did not ask before replacing the file");
+    const reads = sentOf("map_draft").length;
+    [...dialog.querySelectorAll("button")].find((b) => b.textContent === "Cancel").click();
+    await wait(300);
+    if (JSON.stringify(sentOf("map_draft_accept")) !== JSON.stringify([{ project: "/w/plotkeeper" }])) log("snap:fail a no sent " + JSON.stringify(sentOf("map_draft_accept")));
+    if (sentOf("map_draft").length !== reads + 1) log("snap:fail a no did not read the Map draft again");
+    if (!document.querySelector("#map .map-drafting")) log("snap:fail a no dropped the Map draft");
+    accept().click();
+    await wait(300);
+    if (!dialog.matches(":modal")) return log("snap:fail Write did not ask again");
+    answer("map_draft_accept", { kind: "written", path: "/w/plotkeeper/system-map.json" });
+    answer("map_state", ${JSON.stringify(mapState({ from: "checkout" }))});
+    document.getElementById("confirm-yes").click();
+    await wait(600);
+    const asked = sentOf("map_draft_accept");
+    if (JSON.stringify(asked.at(-1)) !== JSON.stringify({ project: "/w/plotkeeper", replace: "00c0ffee00c0ffee" })) log("snap:fail the yes sent " + JSON.stringify(asked.at(-1)));
+    if (document.querySelector("#map .map-drafting, #map .map-scan")) log("snap:fail the Map draft stays once the map is written");
+    if (!document.querySelector("#map .map-canvas .plate[data-id=shell]")) log("snap:fail the written map is not drawn: " + document.getElementById("map-body").textContent.replace(/\\s+/g, " ").slice(0, 200));
+    if (document.getElementById("map-ref").textContent !== "Map not committed yet") log("snap:fail the head says " + document.getElementById("map-ref").textContent);
+    if ([...document.querySelectorAll("#map button")].some((b) => /draft PR/.test(b.textContent))) log("snap:fail a PR button shows on the written map");
+    const keep = document.getElementById("map-keep");
+    if (keep.hidden || !keep.textContent.includes("Keep it current")) log("snap:fail the card does not open after Accept");
+    log("draft write ok");`, {
+    map_state: mapState({ status: "none", source: null, from: null }),
+    map_draft: reviewDraft,
+    budget: 9000,
+    snapDone: "draft write ok",
+  });
+/**
+ * Keep it current (#753, ticket #766): the quiet button in the map's head is there with the map drawn and the card shut; a press opens the card
+ * with its two snippets, each with Copy, and the note naming .git/info/exclude, and a second press shuts it.
+ */
+export const mapKeepCurrent = (): Fixture =>
+  mapBaseOf(`
+    const button = document.getElementById("keep-current-button");
+    const card = document.getElementById("map-keep");
+    if (button.hidden || button.textContent !== "Keep it current") return log("snap:fail no Keep it current button with a map drawn");
+    if (!card.hidden) log("snap:fail the card is open before it is asked for");
+    button.click();
+    await wait(200);
+    if (card.hidden || button.getAttribute("aria-expanded") !== "true") return log("snap:fail the button did not open the card");
+    const code = [...card.querySelectorAll("pre")].map((pre) => pre.textContent);
+    if (code.length !== 2 || !code[0].includes("npx -y plotkeeper map check") || !code[1].includes("actions/checkout")) log("snap:fail the snippets are " + JSON.stringify(code));
+    if ([...card.querySelectorAll('button[aria-label^="Copy"]')].length !== 2) log("snap:fail each snippet has no Copy");
+    if (!card.textContent.includes(".git/info/exclude")) log("snap:fail the card does not name .git/info/exclude");
+    frame("with the Keep it current card");
+    checkColours("with the Keep it current card");
+    button.click();
+    await wait(100);
+    if (!card.hidden) log("snap:fail a second press did not shut the card");
+    button.click();
+    await wait(100);
+    log("base ok");`);
 // Switching projects (#386's review): what one project's map started is not lost or left over on the next. `calls` are the commands the
 // page sends from here on; `open(path)` presses a project's header. Pokedex's folder is gone, and it has a live session, so its header
 // shows (spec #659).
@@ -1148,6 +1730,7 @@ export const mapReview = () =>
     if (!review.textContent.includes("Little used so far: the Map view, the history strip and See the proof")) log("snap:fail the review's words: " + review.textContent);
     if (/\\d/.test(review.querySelector(".review-text").textContent)) log("snap:fail the review shows a count");
     log("review ok");`, { map_state: mapState(), stop_facts: dueFacts });
+/** A repository whose scan failed keeps the first map's plain prompt (#669) in the map's place. */
 export const mapEmpty = () =>
   mapOpened(`
     const draft = document.querySelector("#map .map-empty .map-draft");
@@ -1164,7 +1747,125 @@ export const mapEmpty = () =>
     const toast = document.getElementById("copy-toast");
     if (!toast.matches(":popover-open") || !toast.textContent.includes("Prompt copied")) log("snap:fail the copy toast does not say the prompt was copied: " + toast.textContent);
     if (window.__copied !== draft.textContent) log("snap:fail the clipboard holds " + JSON.stringify(window.__copied) + ", not the prompt");
-    log("drafting prompt: " + draft.textContent.slice(0, 40));`, { map_state: mapState({ status: "none", source: null }) });
+    log("drafting prompt: " + draft.textContent.slice(0, 40));`, { map_state: mapState({ status: "none", source: null, from: null }), map_scan: { __throw: "git ls-files failed" } as never });
+
+// A map waiting on draft PR #7 (#765), open or closed unmerged.
+const pendingState = (closed: boolean, extra: Partial<NonNullable<MapState["pending"]>> = {}) =>
+  mapState({ from: "pending-pr", reference: "origin/main", pending: { number: 7, closed, path: "/w/plotkeeper/system-map.json", pr_muted: null, ...extra } });
+// The check's problems of a map read from the checkout (#753): four, of which the banner shows three.
+const checkoutProblems = [
+  "server/src/new.rs: no part owns it",
+  "part shell: owns no tracked file",
+  "link shell-window: no import proves it",
+  "law brief-cites-facts: no test is tagged with it",
+];
+/**
+ * A map the user's agent wrote into the checkout (#753): drawn at once, the head says "Map not committed yet" in the ref's place, and the
+ * check's problems show over it as a banner, the count, the first three and a copy of all four.
+ */
+export const mapCheckout = () =>
+  mapOpened(`
+    const ref = document.getElementById("map-ref");
+    if (ref.textContent !== "Map not committed yet") log("snap:fail the head says " + JSON.stringify(ref.textContent));
+    if (!document.querySelector("#map .plate[data-id=shell]")) return log("snap:fail a checkout map failing the check is not drawn");
+    const banner = document.getElementById("map-problems");
+    if (banner.hidden || banner.getAttribute("role") !== "status") return log("snap:fail no problems banner");
+    if (!banner.textContent.includes("system-map check found 4 problems")) log("snap:fail the banner's count: " + banner.textContent);
+    const shown = [...banner.querySelectorAll("li")].map((li) => li.textContent);
+    if (JSON.stringify(shown) !== ${JSON.stringify(JSON.stringify(checkoutProblems.slice(0, 3)))}) log("snap:fail the banner lists " + JSON.stringify(shown));
+    if (!banner.textContent.includes("and 1 more")) log("snap:fail the banner does not say there is one more");
+    const copy = banner.querySelector(".copy-icon");
+    if (copy?.getAttribute("aria-label") !== "Copy all the problems") return log("snap:fail the banner has no copy of them all");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (words) => void (window.__copied = words) } });
+    copy.click();
+    await wait(150);
+    for (const problem of ${JSON.stringify(checkoutProblems)}) if (!window.__copied?.includes(problem)) log("snap:fail the copy lacks " + problem);
+    log("checkout ok");`, { map_state: mapState({ from: "checkout", problems: checkoutProblems }) });
+/** A map waiting on its draft PR (#753, story 26): drawn from plotkeeper's copy, the head says "Map waiting on PR #7", and nothing asks more. */
+export const mapPendingOpen = (): Fixture =>
+  mapBaseOf(`
+    const ref = document.getElementById("map-ref");
+    if (ref.textContent !== "Map waiting on PR #7") log("snap:fail the head says " + JSON.stringify(ref.textContent));
+    if (!document.querySelector("#map .plate[data-id=shell]")) return log("snap:fail the map waiting on its PR is not drawn");
+    if (!document.getElementById("map-pending").hidden) log("snap:fail an open PR's map shows a closed PR's ways forward");
+    if (!document.getElementById("map-problems").hidden) log("snap:fail a pending map has a problems banner");
+    frame("waiting on its PR");
+    log("base ok");`, { map_state: pendingState(false) });
+/**
+ * A map whose draft PR closed unmerged (#753, story 28): still drawn, the head says "Map not in the repo", and under it the line and the three
+ * ways forward, a named group: Write to the checkout's path, Open a draft PR, and Discard.
+ */
+export const mapPendingClosed = (): Fixture =>
+  mapBaseOf(`
+    const ref = document.getElementById("map-ref");
+    if (ref.textContent !== "Map not in the repo") log("snap:fail the head says " + JSON.stringify(ref.textContent));
+    if (!document.querySelector("#map .plate[data-id=shell]")) return log("snap:fail the closed PR's map is not drawn");
+    const box = document.getElementById("map-pending");
+    if (box.hidden) return log("snap:fail no ways forward for the closed PR's map");
+    if (!box.textContent.includes("PR #7 closed without merging")) log("snap:fail the line says " + box.textContent);
+    const group = box.querySelector('[role="group"]');
+    if (!group?.getAttribute("aria-label")) log("snap:fail the ways forward are not a named group");
+    const order = [...box.querySelectorAll("button")].map((b) => b.dataset.key);
+    if (JSON.stringify(order) !== JSON.stringify(["pending write", "pending pr", "pending discard"])) log("snap:fail the ways forward come in the order " + JSON.stringify(order));
+    const write = box.querySelector('[data-key="pending write"]');
+    if (write?.textContent !== "Write system-map.json to /w/plotkeeper") log("snap:fail Write says " + JSON.stringify(write?.textContent));
+    for (const b of box.querySelectorAll("button")) if (b.hasAttribute("aria-disabled")) log("snap:fail " + b.dataset.key + " is muted");
+    frame("with a closed PR");
+    checkColours("with a closed PR");
+    log("base ok");`, { map_state: pendingState(true) });
+/**
+ * A closed PR's ways forward pressed (#753, story 28): Open a draft PR muted with why while `gh` is logged out sends nothing; Discard asks
+ * first, then sends; Write sends, and once written the map shows from the checkout, "Map not committed yet", with no ways forward left.
+ */
+export const mapPendingSteps = (): Fixture =>
+  mapOpened(`
+    ${draftHarness}
+    const press = (key) => document.querySelector('#map-pending [data-key="' + key + '"]');
+    if (!press("pending write")) return log("snap:fail no ways forward for the closed PR's map");
+    if (press("pending pr").getAttribute("aria-disabled") !== "true") log("snap:fail Open a draft PR is not muted with gh logged out");
+    if (hintText(press("pending pr")) !== ${JSON.stringify(ghLoggedOut)}) log("snap:fail the muted button's hint says " + JSON.stringify(hintText(press("pending pr"))));
+    press("pending pr").click();
+    await wait(200);
+    if (sentOf("map_pending_pr").length) log("snap:fail a muted Open a draft PR reached the server");
+    ${confirmFirst(`document.querySelector('#map-pending [data-key="pending discard"]').click()`, "map_pending_discard", "Discard map", ["plotkeeper's copy", "closed PR stays"])}
+    await wait(300);
+    // A no to the replace question writes nothing and opens no Keep it current card.
+    answer("map_pending_write", { kind: "replace", path: "/w/plotkeeper/system-map.json", problem: ${JSON.stringify(brokenFile)}, seen: "00c0ffee00c0ffee" });
+    press("pending write").click();
+    await wait(300);
+    const dialog = document.getElementById("confirm-dialog");
+    if (!dialog.matches(":modal")) return log("snap:fail the closed PR's Write did not ask before replacing the file");
+    [...dialog.querySelectorAll("button")].find((b) => b.textContent === "Cancel").click();
+    await wait(600);
+    if (!document.getElementById("map-keep").hidden) log("snap:fail a no to the replace question opened Keep it current");
+    answer("map_pending_write", { kind: "written", path: "/w/plotkeeper/system-map.json" });
+    answer("map_state", ${JSON.stringify(mapState({ from: "checkout" }))});
+    press("pending write").click();
+    await wait(600);
+    if (JSON.stringify(sentOf("map_pending_write")) !== JSON.stringify([{ project: "/w/plotkeeper" }, { project: "/w/plotkeeper" }])) log("snap:fail Write sent " + JSON.stringify(sentOf("map_pending_write")));
+    if (document.getElementById("map-keep").hidden) log("snap:fail the card does not open after the closed PR's Write");
+    if (document.getElementById("map-ref").textContent !== "Map not committed yet") log("snap:fail the head says " + document.getElementById("map-ref").textContent);
+    if (!document.getElementById("map-pending").hidden) log("snap:fail the ways forward stay once the map is written");
+    log("pending steps ok");`, {
+    map_state: pendingState(true, { pr_muted: ghLoggedOut }),
+    budget: 9000,
+    snapDone: "pending steps ok",
+  });
+/** The default branch's map gets no banner, whatever its check would say: CI owns that (#753). */
+export const mapDefaultNoBanner = () =>
+  mapOpened(`
+    if (!document.getElementById("map-problems").hidden) log("snap:fail the default branch's map has a problems banner");
+    if (document.getElementById("map-ref").textContent !== "origin/main · 35745b1") log("snap:fail the head lost its ref: " + document.getElementById("map-ref").textContent);
+    log("default ok");`, { map_state: mapState() });
+/** A project whose folder is in no git repository (#753): it says so, and offers no prompt and no button. */
+export const mapNotGit = () =>
+  mapOpened(`
+    const empty = document.querySelector("#map .map-empty");
+    if (!empty?.textContent.includes("Not a git repository: no map")) return log("snap:fail the non-git folder says " + document.getElementById("map-body").textContent);
+    if (empty.querySelector(".map-draft, .btn")) log("snap:fail the non-git folder offers a prompt or a button");
+    if (document.getElementById("pre-flight-button").checkVisibility()) log("snap:fail the non-git folder offers Pre-flight");
+    if (!document.getElementById("map-problems").hidden) log("snap:fail a problems banner with no map");
+    log("not git ok");`, { map_state: mapState({ status: "not-git", source: null, from: null, reference: null, commit: null, note: "not a git repository: no map" }) });
 
 /**
  * The map's marks show their hint to the real pointer (spec #582, ticket 4): a plate's law mark, a broken-law mark and a link's mark on

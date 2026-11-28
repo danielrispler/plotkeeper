@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { arrange } from "../../dist/layout.js";
-import { startProject, wasRemoved } from "../../dist/map-model.js";
+import { askedProject, startProject, wasRemoved } from "../../dist/map-model.js";
 
 test("from 1,007 pixels up the list shows in full, 252 pixels wide, beside the map", () => {
   for (const window of [2560, 1920, 1512, 1007]) assert.deepEqual(arrange(window), { mode: "full", list: 252 });
@@ -31,25 +31,34 @@ test("a folded list in a wide window is its strip, and unfolded it is the full l
   assert.deepEqual(arrange(1512, { folded: true, focus: true }), { mode: "focus", list: 0 });
 });
 
-test("the page opens on the last viewed project's map, else the first project's", () => {
+test("the page opens on the project its address asks for, else the last viewed project's map, else the first project's", () => {
   const saved = ["/w/falinks", "/w/plotkeeper", "/w/pokedex"];
-  assert.equal(startProject("/w/plotkeeper", saved, saved), "/w/plotkeeper");
+  assert.equal(startProject([null, "/w/plotkeeper"], saved, saved), "/w/plotkeeper");
+  // A start in a repository asks for its map (#756), over the last viewed; one not saved, a temporary one, gives way to it.
+  assert.equal(startProject(["/w/pokedex", "/w/plotkeeper"], saved, saved), "/w/pokedex");
+  assert.equal(startProject(["/tmp/scratch", "/w/plotkeeper"], saved, saved), "/w/plotkeeper");
   // Never viewed, or since removed: the first project.
-  assert.equal(startProject(null, saved, saved), "/w/falinks");
-  assert.equal(startProject("/w/removed", saved, saved), "/w/falinks");
+  assert.equal(startProject([null, null], saved, saved), "/w/falinks");
+  assert.equal(startProject([null, "/w/removed"], saved, saved), "/w/falinks");
   // A fresh install has none.
-  assert.equal(startProject("/w/plotkeeper", [], []), null);
+  assert.equal(startProject([null, "/w/plotkeeper"], [], []), null);
+});
+
+test("the address names the project to open as its fragment's project, spelled as the server encodes it", () => {
+  assert.equal(askedProject("#project=/Users/d/my%20repo%2Bplus"), "/Users/d/my repo+plus");
+  assert.equal(askedProject(""), null);
+  assert.equal(askedProject("#other=1"), null);
 });
 
 test("the page falls back to the first project the list shows, while a last viewed project the list hides still opens", () => {
   const saved = ["/tmp/scratch", "/w/gone", "/w/plotkeeper"];
   const listed = ["/w/plotkeeper"];
-  assert.equal(startProject(null, saved, listed), "/w/plotkeeper");
-  assert.equal(startProject("/w/removed", saved, listed), "/w/plotkeeper");
+  assert.equal(startProject([null, null], saved, listed), "/w/plotkeeper");
+  assert.equal(startProject([null, "/w/removed"], saved, listed), "/w/plotkeeper");
   // Its "gone, Remove project" view is unchanged.
-  assert.equal(startProject("/w/gone", saved, listed), "/w/gone");
+  assert.equal(startProject([null, "/w/gone"], saved, listed), "/w/gone");
   // With every saved project hidden (or the sessions not yet read), the first saved one, rather than the fresh install's words.
-  assert.equal(startProject(null, saved, []), "/tmp/scratch");
+  assert.equal(startProject([null, null], saved, []), "/tmp/scratch");
 });
 
 test("the shown project gives way only when it was saved and is removed, not when it was never saved", () => {

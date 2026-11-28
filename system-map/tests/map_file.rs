@@ -144,3 +144,24 @@ mod lenient {
         assert!(error.contains("parts"), "{error}");
     }
 }
+
+#[test]
+fn check_text_reports_what_check_reports_for_the_same_map_on_disk() {
+    let mut broken = base();
+    broken["links"] = serde_json::json!([{ "id": "alpha-beta", "from": "alpha", "to": "nowhere", "kind": "import" }]);
+    for map in [base(), broken] {
+        let (_dir, root) = project(&map, &FILES);
+        let files: Vec<String> = FILES
+            .iter()
+            .chain(&["system-map.json"])
+            .map(ToString::to_string)
+            .collect();
+        let on_disk = system_map::check(std::path::Path::new(&root));
+        let from_text =
+            system_map::check_text(std::path::Path::new(&root), files, &map.to_string());
+        assert_eq!(
+            serde_json::to_value(&from_text).unwrap(),
+            serde_json::to_value(&on_disk).unwrap()
+        );
+    }
+}

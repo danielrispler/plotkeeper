@@ -45,6 +45,8 @@ macOS (Apple Silicon and Intel) and Linux (x86_64 and arm64, a desktop as the ta
 
 Summaries default to `claude -p` (`claude` on your login shell's `PATH`); Settings picks another CLI or API-key writer.
 
+A git repository with no map opens on **First map**: a free scan, then **Draft the map** with Claude Code, then **Accept** writes `system-map.json` or opens a draft PR ([how it works](docs/studio/behaviour/map.md#the-map-draft-on-the-map)).
+
 - **Daily use:** `npm i -g plotkeeper && plotkeeper` (avoids ~70 s offline `npx` wait; or `npx --prefer-offline plotkeeper`).
 - **CLI:** `plotkeeper install` (`--yes` for scripts), `plotkeeper uninstall` (undoes wiring, keeps history; [details](docs/studio/plugin.md)), `plotkeeper --version`.
 - **From source** (Rust): `git clone ... && npm ci && npm start`.

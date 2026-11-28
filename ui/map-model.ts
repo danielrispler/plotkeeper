@@ -4,7 +4,7 @@
 
 import { messageOf } from "./dom.js";
 import { isObject } from "./settings.js";
-import type { Ci, CommitFiles, Fog, FogEntry, HistoricalMap, HistoryEntry, MapDiff, MapTag, Proof } from "./types.js";
+import type { Ci, CommitFiles, Fog, FogEntry, HistoricalMap, HistoryEntry, MapDiff, MapTag, Proof, MapDraft } from "./types.js";
 
 export type Tier = "core" | "interface" | "black-box";
 export type Point = { x: number; y: number };
@@ -166,6 +166,64 @@ export const draftPrompt =
   "and the named things it holds (each with one sentence and its key files), the outside actors, the links between them, " +
   "the files that belong to no part on purpose, and the laws that must stay true. Run `system-map check` and fix what it reports until it passes. " +
   "Add the extractors its `note:` lines suggest to `extractors`.";
+
+// The scan screen (#753, "The free scan"; ticket #760): its words, worked out from the scan the server sends (`MapScan`).
+
+// "A, B and C".
+const listed = (names: string[]) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
+
+/** The languages line: those a reader reads, whose links are drawn, then those none reads yet; null when the scan found no code it knows. */
+export function languagesLine(read: string[], unread: string[]): string | null {
+  if (!read.length && !unread.length) return null;
+  if (!read.length) return `${listed(unread)}: no reader yet, so no links are drawn`;
+  return [`${listed(read)}: links computed`, ...(unread.length ? [`${listed(unread)}: no reader yet`] : [])].join(". ");
+}
+
+/** Draft the map's time hint, scaled from the scan's part count: the trial drafted 15 parts in about 3.6 minutes (#753), so a quarter of a minute a part. */
+export function draftTime(parts: number): string {
+  const minutes = Math.max(1, Math.ceil(parts / 4));
+  return `About ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+}
+
+/**
+ * The loose files or tests of a scan (#761) as the panel offers them: one row a folder, its label, the names of its files, and why Ignore is
+ * muted on it, or null: the root, and a folder holding a path of one of `parts`, whose files `ignored` would take (`map_scan.rs` refuses it).
+ */
+export function looseGroups(files: string[], parts: { name: string; paths: string[] }[] = []): { folder: string; label: string; names: string; files: string[]; muted: string | null }[] {
+  const byFolder = new Map<string, string[]>();
+  for (const file of files) {
+    const cut = file.lastIndexOf("/") + 1;
+    const folder = file.slice(0, cut);
+    byFolder.set(folder, [...(byFolder.get(folder) ?? []), file]);
+  }
+  return [...byFolder.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([folder, group]) => {
+      const names = group.map((file) => file.slice(folder.length)).sort();
+      const shown = names.length > 4 ? [...names.slice(0, 3), `${names.length - 3} more`] : names;
+      const held = parts.filter((part) => part.paths.some((path) => path.startsWith(folder))).map((part) => part.name);
+      const muted = !folder ? "Ignoring the root would leave out the whole repository" : held.length ? `Ignoring ${folder} would leave out the files of ${listed(held)}` : null;
+      return { folder, label: folder || "The root", names: listed(shown), files: [...group].sort(), muted };
+    });
+}
+
+/** The folders Ignore left out of a scan's loose rows (#753): the skeleton's `ignored` that are not the copies the scan asks about, sorted. */
+export function ignoredFolders(scan: { map: string; ignore_candidates: { path: string }[] }): string[] {
+  const ignored: unknown = (JSON.parse(scan.map) as { ignored?: unknown }).ignored;
+  const candidates = new Set(scan.ignore_candidates.map((candidate) => candidate.path));
+  return (Array.isArray(ignored) ? ignored : []).filter((path): path is string => typeof path === "string" && !candidates.has(path)).sort();
+}
+
+/** The copy-prompt for the user's own agent (#753, story 13): the skeleton, the file to write and the check to pass, so the agent fills only the words. */
+export function scanPrompt(skeleton: string): string {
+  return (
+    "Write system-map.json at the root of this repository's main checkout, starting from the skeleton below, which plotkeeper's free scan " +
+    "proposed from the folders and build manifests. Keep its parts, paths and import links unless the check asks otherwise. For each part, " +
+    "read its files and write a name, a caption of a few words and a purpose of one or two sentences, saying only what the code shows. " +
+    "Then run `npx plotkeeper map check` and fix what it reports until it passes.\n\n" +
+    JSON.stringify(JSON.parse(skeleton), null, 2)
+  );
+}
 
 // The part sheet (ticket #310) as data: what `map-sheet.ts` draws for one part.
 const tierLabel: Record<Tier, string> = { core: "Core", interface: "Interface-only", "black-box": "Black box" };
@@ -444,12 +502,14 @@ export const pressRow = (panel: PanelContent | null, session: string): PanelCont
 export const panelSession = (panel: PanelContent | null): string | null =>
   panel?.kind === "story" || panel?.kind === "diff" || panel?.kind === "log" ? panel.session : null;
 /**
- * The project the page opens on (#386): the last viewed, while the saved list still holds it, else the first of those the session list
- * shows (`listed`: not a gone or temporary one, spec #659), else, when it shows none, or the sessions are not read yet, the first saved;
- * none on a fresh install.
+ * The project the page opens on (#386): the first of `wanted` (the one its address asks for, then the last viewed) while the saved list
+ * still holds it, else the first of those the session list shows (`listed`: not a gone or temporary one, spec #659), else, when it shows
+ * none, or the sessions are not read yet, the first saved; none on a fresh install.
  */
-export const startProject = (last: string | null, projects: string[], listed: string[]): string | null =>
-  last !== null && projects.includes(last) ? last : (listed[0] ?? projects[0] ?? null);
+export const startProject = (wanted: (string | null)[], projects: string[], listed: string[]): string | null =>
+  wanted.find((path) => path !== null && projects.includes(path)) ?? listed[0] ?? projects[0] ?? null;
+/** The project the page's address asks for: `#project=<path>`, which `plotkeeper` started in a repository opens on (#756). */
+export const askedProject = (hash: string): string | null => new URLSearchParams(hash.slice(1)).get("project");
 /**
  * Whether the shown project was removed from the saved list (`before` to `now`), so the map gives way: a project never saved, a temporary
  * one or a live session's, stays shown through another project's change.
@@ -514,3 +574,23 @@ export const lineTag = (diff: Pick<MapDiff, "lines"> | null, from: string, to: s
 };
 /** The word a Map diff's tag writes on a plate's edge. */
 export const tagWord = (tag: MapTag): string => ({ added: "New", removed: "Gone", edited: "Edited" })[tag];
+
+/**
+ * Where a Map draft's part stands (#753, stories 14-16 and 20; ticket #763): as its latest group does, since a Redraft this part is a group
+ * of its own after the first; a done part is flagged when the reviewer's verdict on its purpose is.
+ */
+export type DraftStage = "writing" | "redrafting" | "checking" | "checked" | "flagged" | "writer-failed" | "reviewer-failed";
+export function partStage(draft: MapDraft, id: string): DraftStage {
+  const group = draft.groups.filter((each) => each.parts.includes(id)).at(-1);
+  if (!group || group.state === "writing") return group?.redraft ? "redrafting" : "writing";
+  if (group.state === "done") return draft.verdicts[id]?.flagged ? "flagged" : "checked";
+  return group.state;
+}
+
+/** The Map draft's progress line: how many of `ids` a reviewer answered on, and how many are being checked, being written or failed. */
+export function draftProgress(draft: MapDraft, ids: string[]): string {
+  const stages = ids.map((id) => partStage(draft, id));
+  const count = (...of: DraftStage[]) => stages.filter((stage) => of.includes(stage)).length;
+  const rest: [number, string][] = [[count("checking"), "being checked"], [count("writing", "redrafting"), "being written"], [count("writer-failed", "reviewer-failed"), "failed"]];
+  return [`${count("checked", "flagged")} of ${ids.length} ${ids.length === 1 ? "part" : "parts"} checked`, ...rest.filter(([n]) => n > 0).map(([n, words]) => `${n} ${words}`)].join(" · ");
+}

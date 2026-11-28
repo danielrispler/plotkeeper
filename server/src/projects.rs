@@ -4,6 +4,8 @@
 //! after its sessions end or are deleted, and leaves only through Remove project. A removed project comes back only for a
 //! session active after its removal, so the ended sessions still listed never bring it back.
 //!
+//! A repository also joins when `plotkeeper` starts in it (spec #753, "Projects"; #756), with no session: [`Projects::register`].
+//!
 //! A saved folder that no longer exists is listed as gone, never as an error, and Remove project works on it.
 //!
 //! A folder under one of the system's temporary folders is temporary (spec #659): it is never saved, and one an earlier build saved is
@@ -116,6 +118,32 @@ impl Projects {
             write(&self.file, saved)?;
         }
         Ok(changed)
+    }
+
+    /// Start-up registration (spec #753, "Projects"): adds the project of `folder`, the one plotkeeper started in, with no session. Its
+    /// project is its git root, found by the lookup sessions use, mapped as a session's is: a task's worktree to its main checkout. A
+    /// removed project comes back, as starting plotkeeper in it asks for it. Returns the project when it is on the list, `None` for a
+    /// folder with no git root or a temporary project.
+    #[allow(
+        clippy::significant_drop_tightening,
+        reason = "the list is changed and written under one lock, so two changes never lose one"
+    )]
+    pub fn register(&self, folder: &str) -> Result<Option<String>, String> {
+        let Some(root) = studio_understanding::worktree_root(folder) else {
+            return Ok(None);
+        };
+        let repo = studio_core::project_of(&root);
+        if self.temporary(repo) {
+            return Ok(None);
+        }
+        let mut held = self.saved.lock().unwrap();
+        let saved = held.get_or_insert_with(|| read(&self.file));
+        if !saved.projects.iter().any(|p| p == repo) {
+            saved.removed.remove(repo);
+            saved.projects.push(repo.to_string());
+            write(&self.file, saved)?;
+        }
+        Ok(Some(repo.to_string()))
     }
 
     /// The saved projects, in the order they joined, each marked gone when its folder is not there and temporary when it is under a

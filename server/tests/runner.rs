@@ -670,18 +670,38 @@ fn the_allow_list_is_read_only_git_and_the_checks_and_never_a_push_or_gh() {
 }
 
 #[test]
-fn a_micro_world_has_no_bash_and_writes_only_its_own_folder() {
+fn a_kind_with_no_shell_reads_and_writes_only_where_it_may() {
     let checks = vec!["cargo test".to_string()];
-    let command = claude_command(Path::new("/bin/claude"), &plan(Kind::MicroWorld, &checks));
-    assert_eq!(after(&command.args, "--tools"), "Read,Edit,Write,Glob,Grep");
-    // The working folder holds the project's files to read; the agent writes only into its output folder there (#399).
-    assert!(!command.args.iter().any(|a| a == "--add-dir"));
-    let allowed = allowed_tools(Kind::MicroWorld, Path::new("/runs/r1/work"), &checks);
-    assert_eq!(allowed, ["Edit(//runs/r1/work/.micro-world/**)"]);
-    assert_eq!(
-        Limits::of(Kind::MicroWorld).timeout,
-        Duration::from_secs(10 * 60)
-    );
+    // The kind, its tools, its allow list and its limit in minutes.
+    let rows: [(Kind, &str, &[&str], u64); 2] = [
+        // The working folder holds the project's files to read; the agent writes only into its output folder there (#399).
+        (
+            Kind::MicroWorld,
+            "Read,Edit,Write,Glob,Grep",
+            &["Edit(//runs/r1/work/.micro-world/**)"],
+            10,
+        ),
+        // A first map's writer or reviewer only reads, and answers in its result (#753).
+        (Kind::FirstMap, "Read,Glob,Grep", &[], 10),
+    ];
+    for (kind, tools, allows, minutes) in rows {
+        let command = claude_command(Path::new("/bin/claude"), &plan(kind, &checks));
+        assert_eq!(after(&command.args, "--tools"), tools, "{kind:?}");
+        assert!(!command.args.iter().any(|a| a == "--add-dir"), "{kind:?}");
+        let allowed = allowed_tools(kind, Path::new("/runs/r1/work"), &checks);
+        assert_eq!(allowed, allows, "{kind:?}");
+        // An empty list is no flag at all.
+        assert_eq!(
+            command.args.iter().any(|a| a == "--allowedTools"),
+            !allows.is_empty(),
+            "{kind:?}"
+        );
+        assert_eq!(
+            Limits::of(kind).timeout,
+            Duration::from_secs(minutes * 60),
+            "{kind:?}"
+        );
+    }
     assert_eq!(
         Limits::of(Kind::BackLaw).timeout,
         Duration::from_secs(30 * 60)
@@ -856,6 +876,24 @@ fn checks_and_setup_are_read_fresh_for_each_run_and_a_project_with_none_is_refus
     assert_eq!(refused.line, "Set this project's checks");
     assert_eq!(refused.prompt, "echo never");
     assert!(!folder.exists());
+
+    // A first map has no shell, so the checks gate never applies, and it gets no setup.
+    settings(
+        bench.dir.path(),
+        r#"{ "checks": { "/p/elsewhere": ["make"] }, "setup": { "/p/app": "touch setup-ran" } }"#,
+    );
+    let mut request = bench.request(
+        PROJECT,
+        "test -e setup-ran && echo setup ran || echo no setup",
+    );
+    request.kind = Kind::FirstMap;
+    let first_map = bench.runner.submit(request).unwrap();
+    bench.until(ended(&first_map));
+    let outcome = bench.runner.outcome(&first_map).unwrap();
+    assert_eq!(
+        (outcome.end, outcome.result.as_str()),
+        (End::Done, "no setup")
+    );
 }
 
 #[test]
@@ -889,6 +927,343 @@ fn one_run_at_a_time_per_project_and_the_queue_runs_in_order() {
     fs::write(bench.folder(&other).join("work/go"), "").unwrap();
     bench.until(ended(&other));
     assert_eq!(bench.runner.outcome(&second).unwrap().result, "second");
+}
+
+#[test]
+fn a_batch_starts_together_and_holds_its_projects_slot_until_its_last_run_ends() {
+    let bench = bench();
+    let before = bench.run(&waits("before"));
+    let mut short = bench.request(PROJECT, "sleep 60");
+    short.limits.timeout = Duration::from_secs(1);
+    let batch = bench
+        .runner
+        .submit_batch(vec![
+            bench.request(PROJECT, &waits("a")),
+            bench.request(PROJECT, &waits("b")),
+            short,
+        ])
+        .unwrap();
+    let [a, b, short] = <[String; 3]>::try_from(batch).unwrap();
+    let later = bench.run("echo later");
+    bench.until(|_| bench.state(&before) == Some(RunState::Running));
+    for id in [&a, &b, &short, &later] {
+        assert_eq!(bench.state(id), Some(RunState::Queued), "{id}");
+    }
+
+    // The batch takes the slot when it frees, all of it at once, and the later request waits behind it.
+    fs::write(bench.folder(&before).join("work/go"), "").unwrap();
+    bench.until(|_| {
+        [&a, &b, &short]
+            .iter()
+            .all(|id| bench.state(id) != Some(RunState::Queued))
+    });
+    assert_eq!(bench.state(&a), Some(RunState::Running));
+    assert_eq!(bench.state(&b), Some(RunState::Running));
+    // Each run keeps its own limit.
+    bench.until(ended(&short));
+    assert_eq!(bench.runner.outcome(&short).unwrap().end, End::TimedOut);
+    assert_eq!(bench.state(&later), Some(RunState::Queued));
+
+    fs::write(bench.folder(&a).join("work/go"), "").unwrap();
+    bench.until(ended(&a));
+    assert_eq!(bench.state(&b), Some(RunState::Running));
+    assert_eq!(bench.state(&later), Some(RunState::Queued));
+
+    // The slot frees when the last of them ends.
+    fs::write(bench.folder(&b).join("work/go"), "").unwrap();
+    bench.until(ended(&later));
+    for (id, said) in [(&a, "a"), (&b, "b"), (&later, "later")] {
+        assert_eq!(bench.runner.outcome(id).unwrap().result, said);
+    }
+    // Each has its own folder and status.
+    for id in [&a, &b, &short] {
+        assert!(bench.folder(id).join("status.json").exists(), "{id}");
+    }
+}
+
+#[test]
+fn a_run_that_joins_an_active_batch_starts_at_once() {
+    let bench = bench();
+    let ids = bench
+        .runner
+        .submit_batch(vec![bench.request(PROJECT, &waits("writer"))])
+        .unwrap();
+    let writer = &ids[0];
+    let later = bench.run("echo later");
+    bench.until(|_| bench.state(writer) == Some(RunState::Running));
+    // A reviewer, a retry or a redraft joins the batch ahead of the request that waits behind it.
+    let reviewer = bench
+        .runner
+        .join(writer, bench.request(PROJECT, &waits("reviewer")))
+        .unwrap();
+    assert_eq!(bench.state(&reviewer), Some(RunState::Running));
+    assert_eq!(bench.state(&later), Some(RunState::Queued));
+    fs::write(bench.folder(writer).join("work/go"), "").unwrap();
+    bench.until(ended(writer));
+    assert_eq!(bench.state(&later), Some(RunState::Queued));
+    fs::write(bench.folder(&reviewer).join("work/go"), "").unwrap();
+    bench.until(ended(&later));
+}
+
+#[test]
+fn a_run_its_batchs_last_end_joins_starts_before_the_request_waiting_behind_the_batch() {
+    let bench = bench();
+    let ids = bench
+        .runner
+        .submit_batch(vec![bench.request(PROJECT, &waits("writer"))])
+        .unwrap();
+    let writer = ids[0].clone();
+    bench.until(|_| bench.state(&writer) == Some(RunState::Running));
+    let later = bench.run("echo later");
+    // The module told of the writer's end joins its reviewer then, as First map does, before the slot frees.
+    let (tell, joined) = mpsc::channel();
+    let runner = Arc::downgrade(&bench.runner);
+    let reviewer = bench.request(PROJECT, &waits("reviewer"));
+    let reviewer = std::sync::Mutex::new(Some(reviewer));
+    let batch = writer.clone();
+    bench.runner.on_end(move |end| {
+        if end.id != batch {
+            return;
+        }
+        let request = reviewer.lock().unwrap().take();
+        if let (Some(runner), Some(request)) = (runner.upgrade(), request) {
+            drop(tell.send(runner.join(&batch, request).unwrap()));
+        }
+    });
+    fs::write(bench.folder(&writer).join("work/go"), "").unwrap();
+    let reviewer = joined.recv_timeout(Duration::from_secs(30)).unwrap();
+    assert_eq!(bench.state(&reviewer), Some(RunState::Running));
+    assert_eq!(bench.state(&later), Some(RunState::Queued));
+    fs::write(bench.folder(&reviewer).join("work/go"), "").unwrap();
+    bench.until(ended(&later));
+}
+
+#[test]
+fn a_batch_with_a_request_refused_is_refused_whole_and_leaves_no_folder() {
+    let bench = bench();
+    let first = bench.request(PROJECT, "echo first");
+    let third = bench.request(PROJECT, "echo third");
+    let folders = [first.folder.clone(), third.folder.clone()];
+    let mut refused = bench.request(PROJECT, "echo refused");
+    refused.project = "/p/no-checks".into();
+    let refusal = bench
+        .runner
+        .submit_batch(vec![first, refused, third])
+        .unwrap_err();
+    assert_eq!(refusal.line, "Set this project's checks");
+    assert_eq!(refusal.prompt, "echo refused");
+    assert!(bench.runner.runs(PROJECT).runs.is_empty());
+    for folder in folders {
+        assert!(!folder.exists(), "{}", folder.display());
+    }
+    // Nothing of it is picked up at the next start.
+    let Bench {
+        dir,
+        // Before `runner`, so it drops after it and before `dir`.
+        guard: _guard,
+        runner,
+        changes,
+    } = bench;
+    drop((runner, changes));
+    let (runner, _changes) = open(dir.path(), Arc::new(Script));
+    assert!(runner.runs(PROJECT).runs.is_empty());
+    assert_eq!(fs::read_dir(dir.path().join("runs")).unwrap().count(), 0);
+}
+
+#[test]
+fn discarding_a_batch_cancels_every_run_of_it_and_frees_the_slot() {
+    let bench = bench();
+    // A module that listens is told each end: a cancelled run's as `Cancelled`, a run that ended on its own as it ended, and once.
+    let (tell, told) = mpsc::channel();
+    bench
+        .runner
+        .on_end(move |end| drop(tell.send((end.id, end.end))));
+    // Queued behind another run: its runs are dropped and never start.
+    let before = bench.run(&waits("before"));
+    let queued = bench
+        .runner
+        .submit_batch(vec![
+            bench.request(PROJECT, "touch started"),
+            bench.request(PROJECT, "touch started"),
+        ])
+        .unwrap();
+    bench.until(|_| bench.state(&before) == Some(RunState::Running));
+    bench.runner.cancel_batch(&queued[0]).unwrap();
+    for id in &queued {
+        assert_eq!(bench.state(id), None, "{id}");
+        assert!(!bench.folder(id).exists(), "{id}");
+    }
+    assert_eq!(bench.state(&before), Some(RunState::Running));
+    fs::write(bench.folder(&before).join("work/go"), "").unwrap();
+    bench.until(ended(&before));
+
+    // Running: its running runs are stopped and its ended ones removed, and the request behind it starts.
+    let batch = bench
+        .runner
+        .submit_batch(vec![
+            bench.request(PROJECT, &waits("never")),
+            bench.request(PROJECT, "echo quick"),
+        ])
+        .unwrap();
+    let later = bench.run("echo later");
+    bench.until(|_| {
+        bench.state(&batch[0]) == Some(RunState::Running)
+            && bench.state(&batch[1]) == Some(RunState::Ended)
+    });
+    let pid = launch(&bench.folder(&batch[0]))["pid"].as_u64().unwrap();
+    assert_eq!(bench.state(&later), Some(RunState::Queued));
+    bench.runner.cancel_batch(&batch[0]).unwrap();
+    for id in &batch {
+        assert_eq!(bench.state(id), None, "{id}");
+        assert!(!bench.folder(id).exists(), "{id}");
+    }
+    assert!(gone(pid), "a running run of the batch outlived its discard");
+    bench.until(ended(&later));
+    let cancelled = bench
+        .records()
+        .iter()
+        .filter(|record| record["outcome"] == "cancelled")
+        .count();
+    assert_eq!(cancelled, 3);
+    let mut ends: Vec<(String, End)> = (0..6)
+        .map(|_| told.recv_timeout(Duration::from_secs(30)).unwrap())
+        .collect();
+    ends.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut want = vec![
+        (before, End::Done),
+        (queued[0].clone(), End::Cancelled),
+        (queued[1].clone(), End::Cancelled),
+        (batch[0].clone(), End::Cancelled),
+        (batch[1].clone(), End::Done),
+        (later, End::Done),
+    ];
+    want.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(ends, want);
+    assert!(told.recv_timeout(Duration::from_millis(300)).is_err());
+}
+
+/// The script of a harness that fails on a usage limit.
+fn limited() -> String {
+    format!(
+        "{}\nexit 1",
+        says(
+            r#"{"type":"result","subtype":"success","is_error":true,"result":"Claude usage limit reached. Your limit will reset at 5pm.","total_cost_usd":0}"#
+        )
+    )
+}
+
+#[test]
+fn a_limit_failure_mid_batch_pauses_the_queues_and_keeps_the_batchs_ended_runs() {
+    let bench = bench();
+    let batch = bench
+        .runner
+        .submit_batch(vec![
+            bench.request(PROJECT, "echo landed"),
+            bench.request(PROJECT, &limited()),
+            bench.request(PROJECT, &waits("still running")),
+        ])
+        .unwrap();
+    let [landed, failed, running] = <[String; 3]>::try_from(batch).unwrap();
+    bench.until(|r| ended(&landed)(r) && ended(&failed)(r));
+    assert!(bench.runner.runs(PROJECT).paused.is_some());
+    assert_eq!(bench.runner.outcome(&landed).unwrap().result, "landed");
+    assert_eq!(bench.runner.outcome(&failed).unwrap().end, End::RateLimited);
+    let mut outcomes: Vec<String> = bench
+        .records()
+        .iter()
+        .map(|record| record["outcome"].as_str().unwrap().to_string())
+        .collect();
+    outcomes.sort();
+    assert_eq!(outcomes, ["done", "rate-limited"]);
+    // A run already going goes on; a retry waits for Resume, as the request behind the batch does.
+    assert_eq!(bench.state(&running), Some(RunState::Running));
+    let retry = bench
+        .runner
+        .join(&landed, bench.request(PROJECT, "echo retried"))
+        .unwrap();
+    let later = bench.run("echo later");
+    assert_eq!(bench.state(&retry), Some(RunState::Queued));
+
+    // After Resume the retry joins the batch, which still holds the slot.
+    bench.runner.resume();
+    bench.until(ended(&retry));
+    assert_eq!(bench.runner.outcome(&retry).unwrap().result, "retried");
+    assert_eq!(bench.state(&later), Some(RunState::Queued));
+    fs::write(bench.folder(&running).join("work/go"), "").unwrap();
+    bench.until(ended(&later));
+}
+
+#[test]
+fn a_restart_mid_batch_finds_every_run_of_it_and_leaves_no_slot_held() {
+    let Bench {
+        dir,
+        // Before `runner`, so it drops after it and before `dir`.
+        guard: _guard,
+        runner,
+        changes,
+    } = bench();
+    let request = |script: &str| Request {
+        kind: Kind::BackLaw,
+        project: PROJECT.into(),
+        folder: runner.new_folder().unwrap(),
+        prompt: script.into(),
+        limits: Limits::of(Kind::BackLaw),
+    };
+    let batch = runner
+        .submit_batch(vec![
+            request(&waits("live")),
+            request("sleep 60"),
+            request(&waits("ended")),
+        ])
+        .unwrap();
+    let [live, dead, finished] = <[String; 3]>::try_from(batch).unwrap();
+    let later = submit(&runner, PROJECT, "echo later");
+    until(&runner, &changes, |r| {
+        [&live, &dead, &finished]
+            .iter()
+            .all(|id| state(r, id) == Some(RunState::Running))
+    });
+    let runs = dir.path().join("runs");
+    let pid = launch(&runs.join(&dead))["pid"].as_u64().unwrap();
+    // plotkeeper stops; meanwhile one run dies and another ends.
+    drop((runner, changes));
+    kill_group(pid);
+    assert!(gone(pid));
+    fs::write(runs.join(&finished).join("work/go"), "").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !runs.join(&finished).join("status.json").exists() {
+        assert!(Instant::now() < deadline, "the run never ended");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(200));
+
+    let (runner, changes) = open(dir.path(), Arc::new(Script));
+    assert_eq!(state(&runner, &live), Some(RunState::Running));
+    assert_eq!(runner.outcome(&dead).unwrap().end, End::Died);
+    assert_eq!(runner.outcome(&finished).unwrap().result, "ended");
+    assert_eq!(state(&runner, &later), Some(RunState::Queued));
+    // The live run still holds the batch's slot: a retry joins it at once.
+    let retry = runner
+        .join(&live, request_in(&runner, "echo retried"))
+        .unwrap();
+    assert_eq!(state(&runner, &retry), Some(RunState::Running));
+    until(&runner, &changes, ended(&retry));
+    assert_eq!(state(&runner, &later), Some(RunState::Queued));
+    // The slot frees when the last live run ends.
+    fs::write(runs.join(&live).join("work/go"), "").unwrap();
+    until(&runner, &changes, ended(&later));
+    assert_eq!(runner.outcome(&live).unwrap().result, "live");
+}
+
+/// A request of `PROJECT` on `runner` whose fake harness runs `script`.
+fn request_in(runner: &Runner, script: &str) -> Request {
+    Request {
+        kind: Kind::BackLaw,
+        project: PROJECT.into(),
+        folder: runner.new_folder().unwrap(),
+        prompt: script.into(),
+        limits: Limits::of(Kind::BackLaw),
+    }
 }
 
 #[test]
@@ -1548,6 +1923,9 @@ fn a_launcher_that_does_not_start_fails_the_run_once_and_frees_the_queue() {
         runner
     };
     let runner = open_with("/no/such/plotkeeper-run");
+    // Its end is told as any end is, so the module that asked for the run is not left waiting on it.
+    let (tell, told) = mpsc::channel();
+    runner.on_end(move |end| drop(tell.send((end.id, end.end))));
     let submit = |script: &str| {
         runner
             .submit(Request {
@@ -1575,6 +1953,11 @@ fn a_launcher_that_does_not_start_fails_the_run_once_and_frees_the_queue() {
     );
     let records = || fs::read_to_string(dir.path().join("data/background-runs.jsonl")).unwrap();
     assert_eq!(records().lines().count(), 2);
+    for id in [&first, &second] {
+        let end = told.recv_timeout(Duration::from_secs(30));
+        assert_eq!(end, Ok((id.clone(), End::Failed)));
+    }
+    assert!(told.recv_timeout(Duration::from_millis(300)).is_err());
 
     // The next start records nothing again and removes what is left.
     drop(runner);
@@ -1816,7 +2199,7 @@ fn cancel_of_a_run_that_ends_at_that_moment_never_fails() {
 }
 
 #[test]
-fn the_module_that_asked_for_a_run_is_told_its_end_once_also_at_a_pick_up() {
+fn every_module_that_listens_is_told_a_runs_end_once_also_at_a_pick_up_and_past_one_that_panics() {
     let dir = tempfile::tempdir().unwrap();
     let _guard = LauncherGuard::new(dir.path().join("runs"));
     settings(dir.path(), r#"{ "checks": { "/p/app": ["cargo test"] } }"#);
@@ -1827,7 +2210,11 @@ fn the_module_that_asked_for_a_run_is_told_its_end_once_also_at_a_pick_up() {
         told
     };
     let runner = Runner::new(config(dir.path(), Arc::new(Script)));
+    // A module whose listener panics is logged, and keeps no other from being told.
+    runner.on_end(|_| panic!("a listener that panics"));
+    // Back a law and First map each listen, and each is told.
     let told = ends(&runner);
+    let other = ends(&runner);
     runner.pick_up();
     let folder = runner.new_folder().unwrap();
     let id = runner
@@ -1851,6 +2238,25 @@ fn the_module_that_asked_for_a_run_is_told_its_end_once_also_at_a_pick_up() {
         (id.as_str(), Kind::BackLaw, PROJECT, &folder, End::Done)
     );
     assert!(told.recv_timeout(Duration::from_millis(300)).is_err());
+    assert_eq!(other.recv_timeout(Duration::from_secs(30)).ok(), Some(end));
+    assert!(other.recv_timeout(Duration::from_millis(300)).is_err());
+    // Nor does it leave a batch holding its project's slot: the request behind the batch runs.
+    let batch = runner
+        .submit_batch(vec![Request {
+            kind: Kind::BackLaw,
+            project: PROJECT.into(),
+            folder: runner.new_folder().unwrap(),
+            prompt: "echo batch".into(),
+            limits: Limits::of(Kind::BackLaw),
+        }])
+        .unwrap();
+    let later = submit(&runner, PROJECT, "echo later");
+    for id in [&batch[0], &later] {
+        assert_eq!(
+            told.recv_timeout(Duration::from_secs(30)).map(|end| end.id),
+            Ok(id.clone())
+        );
+    }
 
     // A run that ends while plotkeeper is stopped is told at the next start, when it is picked up.
     let waiting = runner.new_folder().unwrap();
@@ -1863,7 +2269,7 @@ fn the_module_that_asked_for_a_run_is_told_its_end_once_also_at_a_pick_up() {
             limits: Limits::of(Kind::BackLaw),
         })
         .unwrap();
-    drop((runner, told));
+    drop((runner, told, other));
     fs::write(waiting.join("go"), "").unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     while !dir
@@ -1879,7 +2285,9 @@ fn the_module_that_asked_for_a_run_is_told_its_end_once_also_at_a_pick_up() {
     std::thread::sleep(Duration::from_millis(200));
     let runner = Runner::new(config(dir.path(), Arc::new(Script)));
     let told = ends(&runner);
+    let other = ends(&runner);
     runner.pick_up();
     let end = told.recv_timeout(Duration::from_secs(30)).unwrap();
     assert_eq!((end.id.as_str(), end.end), (id.as_str(), End::Done));
+    assert_eq!(other.recv_timeout(Duration::from_secs(30)).ok(), Some(end));
 }

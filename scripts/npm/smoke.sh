@@ -4,7 +4,8 @@
 # (#368, #706): `npx` of the tarballs, which with no terminal asks nothing, wires nothing and serves (#434), then
 # `npm i -g`, `plotkeeper --version` through the launcher, the four binaries side by side in the platform package for
 # this machine's architecture, `plotkeeper install`, a `plotkeeper` start that serves the page and stops on Ctrl+C,
-# and hooks that keep recording once the npm install folder is gone, as after a switch of Node version.
+# and hooks that keep recording once the npm install folder is gone, as after a switch of Node version, and
+# `plotkeeper map check` on a small repository with a map.
 # The registry has no platform package at an unreleased version, so each is installed beside the launcher from its
 # tarball, where the launcher finds it as it finds the one npm nests in its own node_modules.
 set -eu
@@ -137,6 +138,31 @@ serves "$work/out"
 kill -INT "$server"
 wait "$server" || fail "plotkeeper did not stop cleanly on Ctrl+C"
 server=
+
+# `plotkeeper map check` runs the map checker through the launcher: a small repository with a map passes and exits 0.
+repo="$work/map-repo"
+mkdir -p "$repo/src"
+echo 'x' > "$repo/src/a.txt"
+cat > "$repo/system-map.json" <<'JSON'
+{
+  "version": 2,
+  "parts": [
+    { "id": "src", "name": "Source", "caption": "The source", "purpose": "The only part.", "holds": [], "tier": "core", "paths": ["src/"] }
+  ],
+  "actors": [],
+  "links": [],
+  "ignored": ["system-map.json"],
+  "laws": []
+}
+JSON
+git -C "$repo" init -q
+git -C "$repo" add -A
+git -C "$repo" -c user.name=smoke -c user.email=smoke@example.com commit -q -m smoke
+checked=$(plotkeeper map check --root "$repo") || fail "plotkeeper map check failed on a passing map: $checked"
+case "$checked" in
+  "ok: 1 part own 1 file"*) ;;
+  *) fail "plotkeeper map check printed $checked" ;;
+esac
 
 # The npm install folder goes, as when Node is switched; the hooks run the data folder's copies and still record.
 npm rm -g --prefix "$prefix" plotkeeper "$platform"

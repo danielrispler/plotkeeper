@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { actorSize, autoPlace, draftPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, scrubTickets, sheetOf, sheetMarks, narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, talksTo, linkLines, readingOrder, markPoints, placement, lineTag, tagWord } from "../../dist/map-model.js";
+import { actorSize, autoPlace, draftPrompt, draftProgress, draftTime, partStage, languagesLine, looseGroups, ignoredFolders, scanPrompt, dragMove, dragStart, dragThreshold, effectiveTier, escapeMap, layerOrder, parseMap, plateSize, plateTitle, rimPoint, scrubTickets, sheetOf, sheetMarks, narrowBelow, withPanel, withSheet, pressRow, panelSession, switchProject, talksTo, linkLines, readingOrder, markPoints, placement, lineTag, tagWord } from "../../dist/map-model.js";
 import { cameraRig, revealPan } from "../../dist/map-camera.js";
 
 /** @returns {import("../../dist/map-model.js").Part} */
@@ -386,4 +386,77 @@ test("a Map diff's line is found by its two ends either way round, and its parts
   assert.equal(lineTag(diff, "a", "core"), undefined);
   assert.equal(lineTag(null, "a", "b"), undefined);
   assert.deepEqual(/** @type {const} */ (["added", "removed", "edited"]).map(tagWord), ["New", "Gone", "Edited"]);
+});
+
+// The scan screen's words (#753, "The free scan"; ticket #760).
+test("the languages line names the languages a reader reads, then the ones none reads yet", () => {
+  /** @type {[string[], string[], string | null][]} (read, unread, line) */
+  const cases = [
+    [["TypeScript", "Go"], ["Ruby"], "TypeScript and Go: links computed. Ruby: no reader yet"],
+    [["Rust"], [], "Rust: links computed"],
+    [["Go", "Python", "TypeScript"], ["Kotlin", "Ruby"], "Go, Python and TypeScript: links computed. Kotlin and Ruby: no reader yet"],
+    [[], ["Ruby"], "Ruby: no reader yet, so no links are drawn"],
+    [[], [], null],
+  ];
+  for (const [read, unread, line] of cases) assert.equal(languagesLine(read, unread), line, JSON.stringify([read, unread]));
+});
+
+test("Draft the map's time hint grows with the scan's part count", () => {
+  // The trial drafted 15 parts in about 3.6 minutes (#753): about a quarter of a minute a part, a minute at least.
+  /** @type {[number, string][]} */
+  const cases = [[1, "About 1 minute"], [4, "About 1 minute"], [5, "About 2 minutes"], [15, "About 4 minutes"]];
+  for (const [parts, hint] of cases) assert.equal(draftTime(parts), hint, String(parts));
+});
+
+test("a Map draft's part stands where its latest group does, and the progress line counts the parts", () => {
+  const group = (parts, state, redraft = false) => ({ parts, state, why: null, redraft });
+  const verdict = (id, flag) => ({ id: `part:${id}/purpose`, verdict: flag, why: "", cites: [], flagged: flag !== "supported" });
+  // (groups, verdicts, each part's stage, the progress line): a redraft is the part's latest group, so it stands as that group does.
+  /** @type {[ReturnType<typeof group>[], Record<string, ReturnType<typeof verdict>>, string[], string][]} */
+  const cases = [
+    [[group(["a", "b"], "writing"), group(["c"], "writing")], {}, ["writing", "writing", "writing"], "0 of 3 parts checked · 3 being written"],
+    [[group(["a"], "done"), group(["b"], "checking"), group(["c"], "writer-failed")], { a: verdict("a", "supported") }, ["checked", "checking", "writer-failed"], "1 of 3 parts checked · 1 being checked · 1 failed"],
+    [[group(["a", "b"], "done"), group(["c"], "reviewer-failed")], { a: verdict("a", "overreach"), b: verdict("b", "supported") }, ["flagged", "checked", "reviewer-failed"], "2 of 3 parts checked · 1 failed"],
+    [[group(["a", "b", "c"], "done"), group(["b"], "writing", true)], { a: verdict("a", "supported"), c: verdict("c", "supported") }, ["checked", "redrafting", "checked"], "2 of 3 parts checked · 1 being written"],
+    [[group(["a", "b", "c"], "done")], { a: verdict("a", "supported"), b: verdict("b", "supported"), c: verdict("c", "contradicted") }, ["checked", "checked", "flagged"], "3 of 3 parts checked"],
+  ];
+  for (const [groups, verdicts, stages, line] of cases) {
+    const draft = { map: "", groups, verdicts, not_written: [], ready: false, path: "/w/app/system-map.json", pr_muted: null };
+    assert.deepEqual(["a", "b", "c"].map((id) => partStage(draft, id)), stages, JSON.stringify(groups));
+    assert.equal(draftProgress(draft, ["a", "b", "c"]), line, JSON.stringify(groups));
+  }
+});
+
+test("the loose files are offered by folder, each folder with the names of its files and Ignore muted where it would take a part's files", () => {
+  // (files, parts, rows as [folder, words, why Ignore is muted]): the root's own files say so, and a long folder names three and counts the rest.
+  const root = "Ignoring the root would leave out the whole repository";
+  const parts = [{ name: "App", paths: ["src/app/"] }, { name: "Lib", paths: ["src/lib/"] }, { name: "Docs", paths: ["docs/guide.md"] }];
+  /** @type {[string[], {name: string, paths: string[]}[], [string, string, string | null][]][]} */
+  const cases = [
+    [[], [], []],
+    [["src/index.ts"], [], [["src/", "index.ts", null]]],
+    [["src/index.ts", "main.go", "src/cli.ts", "example/demo/run.ts"], [], [["The root", "main.go", root], ["example/demo/", "run.ts", null], ["src/", "cli.ts and index.ts", null]]],
+    [["t/a.ts", "t/b.ts", "t/c.ts", "t/d.ts", "t/e.ts"], [], [["t/", "a.ts, b.ts, c.ts and 2 more", null]]],
+    // Files that are not code, hidden ones too, are rows like any other (#753: the check asks a home for every tracked file).
+    [["README.md", ".claude/settings.json", "docs/guide.md"], [], [["The root", "README.md", root], [".claude/", "settings.json", null], ["docs/", "guide.md", null]]],
+    // Ignore would leave out the files of a part with a path inside the folder, a folder's or a file's: the server refuses it too.
+    [["src/index.ts", "docs/api.md", "wiki/a.md"], parts, [["docs/", "api.md", "Ignoring docs/ would leave out the files of Docs"], ["src/", "index.ts", "Ignoring src/ would leave out the files of App and Lib"], ["wiki/", "a.md", null]]],
+  ];
+  for (const [files, held, rows] of cases) {
+    const groups = looseGroups(files, held);
+    assert.deepEqual(groups.map((g) => [g.label, g.names, g.muted]), rows, JSON.stringify(files));
+    assert.deepEqual(groups.flatMap((g) => g.files).sort(), [...files].sort(), "every file is in one row");
+  }
+  // The folders Ignore left out are the skeleton's ignored ones that are not the copies the scan asks about, which keep their checkboxes.
+  const scan = { map: JSON.stringify({ ignored: ["vendor/", "wiki/", ".claude/"] }), ignore_candidates: [{ path: "vendor/", ticked: true }, { path: "copy/", ticked: false }] };
+  assert.deepEqual(ignoredFolders(scan), [".claude/", "wiki/"]);
+  assert.deepEqual(ignoredFolders({ map: JSON.stringify({ parts: [] }), ignore_candidates: [] }), []);
+});
+
+test("the copy-prompt carries the skeleton and says where to write the map and which check to pass", () => {
+  const skeleton = JSON.stringify({ version: 2, parts: [{ id: "app", paths: ["src/app/"] }], links: [] });
+  const prompt = scanPrompt(skeleton);
+  assert.ok(prompt.includes(JSON.stringify(JSON.parse(skeleton), null, 2)), prompt);
+  assert.match(prompt, /system-map\.json at the root of this repository's main checkout/);
+  assert.match(prompt, /`npx plotkeeper map check`[^.]*until it passes/);
 });

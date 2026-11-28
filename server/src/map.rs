@@ -1,5 +1,5 @@
 //! The Map view's shell side (spec danielrispler/plotkeeper#306, ticket #309): it reads `system-map.json` from `origin`'s
-//! default branch as last fetched, keeps Daniel's own part positions and tiers in the data folder, and guards `git fetch`.
+//! default branch as last fetched, else from the main checkout, else the map waiting on a draft PR (#753), keeps Daniel's own part positions and tiers in the data folder, and guards `git fetch` and the lookup of that PR.
 //!
 //! Seams for the tickets that build on this one:
 //! - `MapState` is the one payload the window draws from. A ticket adds its field there (fog, live agents, broken laws),
@@ -33,6 +33,32 @@ pub enum Status {
     None,
     /// The file is there but does not read; `problem` says why.
     Unreadable,
+    /// The project's folder is in no git repository, so it has no map to read or draft.
+    NotGit,
+}
+
+/// Where a project's map was read from (#753, "Reading the map"), in the order `read_map` tries them.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReadFrom {
+    /// `system-map.json` on the default branch.
+    DefaultBranch,
+    /// The file in the main checkout's working tree, not committed to the default branch.
+    Checkout,
+    /// The accepted map waiting on its draft PR, in the data folder.
+    PendingPr,
+}
+
+/// The draft PR a `pending-pr` map waits on.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PendingPr {
+    pub number: u64,
+    /// The PR was closed without merging, so the map is not in the repository.
+    pub closed: bool,
+    /// Where Write to `<path>` puts the map once the PR closed: `system-map.json` at the main checkout's root.
+    pub path: String,
+    /// Why Open a draft PR is muted once the PR closed (`gh` missing or not logged in); none when it is not.
+    pub pr_muted: Option<String>,
 }
 
 /// The payload of the Map view: everything the window draws for one project. Extend it with a field per feature.
@@ -40,8 +66,14 @@ pub enum Status {
 pub struct MapState {
     pub project: String,
     pub status: Status,
-    /// The text of `system-map.json` on the default branch; the window parses it.
+    /// The text of `system-map.json` as read from `from`; the window parses it.
     pub source: Option<String>,
+    /// Where the map was read from; none when no source has one.
+    pub from: Option<ReadFrom>,
+    /// The draft PR a `pending-pr` map waits on.
+    pub pending: Option<PendingPr>,
+    /// For a `checkout` map that reads, the problems `system-map check` finds in the working tree; empty for the others.
+    pub problems: Vec<String>,
     /// The ref it was read from, such as `origin/main`.
     pub reference: Option<String>,
     /// The commit that ref was at.
@@ -139,12 +171,92 @@ pub fn default_ref(repo: &Path) -> Option<(String, Option<String>)> {
     })
 }
 
-/// Reads `repo`'s map from its default branch, with no user state yet.
+/// Reads `repo`'s map, with no user state yet, from the first source that has one (#753, "Reading the map"):
+/// 1. `system-map.json` on the default branch, which wins whenever it is there (spec #306, "Single commit of truth");
+/// 2. else the file in the main checkout's working tree, as the user's own agent wrote it;
+/// 3. else the accepted map waiting on its draft PR, in the data folder (`pending_file`).
+///
+/// A folder in no git repository has no map: `Status::NotGit`. Only the default branch is fetched, by `map_state`; the other two
+/// are read as they are.
 pub fn read_map(repo: &Path) -> MapState {
+    read_from(repo, pending_file)
+}
+
+/// The map of a repository that never committed one, for its PR briefs (#753, "PR briefs while the map is not committed"): the
+/// map `read_map` reads from the checkout or a pending PR; none when it reads the default branch's, or none.
+pub(crate) fn uncommitted_map(repo: &Path) -> Option<String> {
+    let read = read_map(repo);
+    match read.from {
+        Some(ReadFrom::Checkout | ReadFrom::PendingPr) => read.source,
+        _ => None,
+    }
+}
+
+/// `read_map` as the Map view shows it: for a `checkout` map that reads, also the problems `system-map check` finds in the working tree,
+/// for the banner over the map. The default branch's map gets none, since CI owns that; nor do the other readers, which need only the map.
+fn read_checked(repo: &Path, pending: impl FnOnce(&str) -> Option<PathBuf>) -> MapState {
+    let mut state = read_from(repo, pending);
+    if state.from == Some(ReadFrom::Checkout)
+        && state.status == Status::Loaded
+        && let Ok(main) = studio_workbench::main_checkout(repo)
+    {
+        state.problems = system_map::check(Path::new(&main)).problems;
+    }
+    state
+}
+
+/// The accepted map waiting on its draft PR (#753, "Open a draft PR"), as that flow keeps it (`map_draft.rs`): the PR's `number` and
+/// `branch`, whether it was `closed` unmerged, the `map`'s text, and, once closed, the Open a draft PR from it that pushed and
+/// stopped short.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PendingFile {
+    pub number: u64,
+    #[serde(default)]
+    pub branch: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub closed: bool,
+    pub map: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening: Option<crate::map_draft::Opening>,
+}
+
+/// Where the map waiting on a draft PR is kept for the project whose main checkout is `main`: `first-map/<project>.pending.json` in
+/// the data folder.
+pub fn pending_file(main: &str) -> Option<PathBuf> {
+    crate::pr_briefs::project_path("first-map", main)
+        .map(|path| path.with_extension("pending.json"))
+}
+
+/// The text of `system-map.json` in the main checkout `main`; none when there is no such file, else why it cannot be read.
+fn checkout_text(main: &str) -> Option<Result<String, String>> {
+    match std::fs::read_to_string(Path::new(main).join(MAP_FILE)) {
+        Ok(text) => Some(Ok(text)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => Some(Err(format!("cannot read it ({error})"))),
+    }
+}
+
+/// The pending file `file`; none when there is none, or it is not one this build reads, which is logged.
+pub(crate) fn read_pending(file: &Path) -> Option<PendingFile> {
+    let text = std::fs::read_to_string(file).ok()?;
+    match serde_json::from_str::<PendingFile>(&text) {
+        Ok(found) => Some(found),
+        Err(why) => {
+            log::warn!("map: {} does not read: {why}", file.display());
+            None
+        }
+    }
+}
+
+/// `read_map` with the pending file of each main checkout given by `pending`.
+fn read_from(repo: &Path, pending: impl FnOnce(&str) -> Option<PathBuf>) -> MapState {
     let mut state = MapState {
         project: repo.display().to_string(),
         status: Status::None,
         source: None,
+        from: None,
+        pending: None,
+        problems: Vec::new(),
         reference: None,
         commit: None,
         note: None,
@@ -161,20 +273,43 @@ pub fn read_map(repo: &Path) -> MapState {
         micro_worlds: crate::micro_worlds::WorldsState::default(),
         law_patches: Vec::new(),
     };
-    let Some((reference, note)) = default_ref(repo) else {
-        state.note = Some("this repository has no default branch to read".into());
+    let Ok(main) = studio_workbench::main_checkout(repo) else {
+        state.status = Status::NotGit;
+        state.note = Some("not a git repository: no map".into());
         return state;
     };
-    state.commit = git(repo, &["rev-parse", &reference]).ok();
-    state.note = note;
-    state.reference = Some(reference.clone());
-    // A missing file is the empty state; any other failure of `git show` is too, since the ref was just found.
-    let Ok(text) = git(repo, &["show", &format!("{reference}:{MAP_FILE}")]) else {
+    // The default branch's ref and commit stay known whichever source the map comes from: micro-worlds build at that commit.
+    let committed = match default_ref(repo) {
+        Some((reference, note)) => {
+            state.commit = git(repo, &["rev-parse", &reference]).ok();
+            state.note = note;
+            state.reference = Some(reference.clone());
+            // A missing file reads on; so does any other failure of `git show`, since the ref was just found.
+            git(repo, &["show", &format!("{reference}:{MAP_FILE}")]).ok()
+        }
+        None => {
+            state.note = Some("this repository has no default branch to read".into());
+            None
+        }
+    };
+    let (from, text) = if let Some(text) = committed {
+        (ReadFrom::DefaultBranch, Ok(text))
+    } else if let Some(text) = checkout_text(&main) {
+        (ReadFrom::Checkout, text)
+    } else if let Some(found) = pending(&main).as_deref().and_then(read_pending) {
+        state.pending = Some(PendingPr {
+            number: found.number,
+            closed: found.closed,
+            path: Path::new(&main).join(MAP_FILE).display().to_string(),
+            pr_muted: None,
+        });
+        (ReadFrom::PendingPr, Ok(found.map))
+    } else {
         return state;
     };
+    state.from = Some(from);
     // A version 1 map is stored converted, so everything after reads version 2 only.
-    match system_map::convert(&text).and_then(|text| system_map::parse_lenient(&text).map(|_| text))
-    {
+    match text.and_then(|text| readable(&text)) {
         Ok(text) => {
             state.status = Status::Loaded;
             state.source = Some(text);
@@ -185,6 +320,12 @@ pub fn read_map(repo: &Path) -> MapState {
         }
     }
     state
+}
+
+/// The map file's `text` as version 2, when it reads as a map: `convert` and `parse_lenient` accept it, whatever `check` says
+/// (#753, "Readable vs unreadable"); else its first problem.
+pub(crate) fn readable(text: &str) -> Result<String, String> {
+    system_map::convert(text).and_then(|text| system_map::parse_lenient(&text).map(|_| text))
 }
 
 /// The outcome of a guarded fetch.
@@ -204,6 +345,8 @@ pub struct Fetches(Mutex<HashMap<String, Slot>>);
 struct Slot {
     last: Option<Instant>,
     running: bool,
+    /// Whether the last fetch that finished passed.
+    passed: bool,
 }
 
 /// Marks the fetch of its repository as no longer running when dropped.
@@ -232,6 +375,15 @@ impl Fetches {
         self.run_after(repo, now, COOLDOWN, fetch)
     }
 
+    /// Whether the last fetch of `repo` that finished passed, whichever trigger ran it.
+    pub fn passed(&self, repo: &str) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(repo)
+            .is_some_and(|slot| slot.passed)
+    }
+
     /// As `run`, with its own `cooldown`: zero asks at once unless one is running.
     pub fn run_after(
         &self,
@@ -257,6 +409,14 @@ impl Fetches {
         let _running = Running(self, repo);
         let result = fetch();
         drop(_running);
+        if let Some(slot) = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_mut(repo)
+        {
+            slot.passed = result.is_ok();
+        }
         match result {
             Ok(()) => Fetched::Done,
             Err(e) => Fetched::Failed(e),
@@ -294,7 +454,7 @@ pub fn update_user(
     )?)
 }
 
-/// Fetches `origin` for `project` through the cooldown. A failure is logged quietly and the refs stay as they were.
+/// Fetches `origin` for `project` through the cooldown, following nothing. A failure is logged quietly and the refs stay as they were.
 fn fetch(fetches: &Fetches, project: &str) -> Fetched {
     let result = fetches.run(project, Instant::now(), || {
         studio_workbench::fetch(Path::new(project))
@@ -305,6 +465,29 @@ fn fetch(fetches: &Fetches, project: &str) -> Fetched {
     result
 }
 
+/// The Map view's `fetch` of `project` at `now` through the cooldown, then the lookup of the draft PR an accepted map waits on
+/// (`follow`) under a cooldown and in-flight guard of its own, told whether the project's last fetch passed: this one, or one a
+/// session's turn end ran (`part_catch_ups::turn_end`), which shares the fetch's cooldown, so turn ends never keep the PR from being
+/// followed. A failure is logged quietly and the refs stay as they were.
+fn fetch_and_follow(
+    fetches: &Fetches,
+    project: &str,
+    now: Instant,
+    fetch: impl FnOnce() -> Result<(), String>,
+    follow: impl FnOnce(bool),
+) -> Fetched {
+    let result = fetches.run(project, now, fetch);
+    if let Fetched::Failed(why) = &result {
+        log::warn!("map: fetch of {project} failed: {why}");
+    }
+    // Its slot is the follow's alone: `fetch`, a fetch after a merge, never takes it.
+    fetches.run(&format!("{project}\npending PR"), now, || {
+        follow(fetches.passed(project));
+        Ok(())
+    });
+    result
+}
+
 /// The Map view's payload for `project`. `fetch` asks for `origin` first: when the view opens and when the window gains
 /// focus while it is open, never on a timer; the cooldown and the in-flight lock decide whether it runs. The same triggers
 /// read CI on the default branch in the background (`ci_laws::refresh_later`), which tells the window when it has an answer.
@@ -312,7 +495,15 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     let (fetches, cache, events) = (&app.fetches, &app.ci, &app.events);
     if fetch {
         crate::prs::ask_later(app, crate::prs::Trigger::MapOpen, Some(&project));
-        let fetched = self::fetch(fetches, &project);
+        // The draft PR an accepted map waits on is asked about after the fetch, and a merged one's copy goes only when the project's
+        // last fetch passed, so its map is on the default branch; never on a timer (#753, "Following the PR").
+        let fetched = fetch_and_follow(
+            fetches,
+            &project,
+            Instant::now(),
+            || studio_workbench::fetch(Path::new(&project)),
+            |passed| app.drafts.follow(&project, passed),
+        );
         // A fetch inside the cooldown asks nothing again, unless nothing was read yet.
         if fetched != Fetched::Skipped || !cache.has(&project) {
             crate::ci_laws::refresh_later(cache, events, &project);
@@ -328,7 +519,10 @@ pub fn map_state(project: String, fetch: bool, app: &Arc<crate::App>) -> Result<
     if let Err(why) = crate::staleness::start(&file, &project, crate::ratify::now()) {
         log::warn!("map: staleness of {project} failed: {why}");
     }
-    let mut state = read_map(repo);
+    let mut state = read_checked(repo, pending_file);
+    if let Some(pending) = state.pending.as_mut().filter(|pending| pending.closed) {
+        pending.pr_muted = app.drafts.pr_muted(&project);
+    }
     state.user = read_user(&file, &project);
     if let Some(source) = &state.source {
         state.fog = crate::fog::effective(&state.user, source);

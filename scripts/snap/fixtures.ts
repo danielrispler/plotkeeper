@@ -7,7 +7,7 @@ import type { Fixture } from "./base.ts";
 import { railFixtures } from "./rail-fixtures.ts";
 import { list, withSaved } from "./fixtures-shared.ts";
 import { alerts, cutText, cutTextStill, hints, listClearLanded, listHeld, listHints, listNarrow, listSecondLines, logDone, logFixture, logos, noticeErrors, notRecording, paletteFocus, paletteOpen, projectChevron, projectMenuScript, projectsSaved, recording, skipLink, snapRealKeys, toastKeys, whatsNewToast } from "./fixtures-page.ts";
-import { mapBadgeList, mapBase, mapBriefPairLight, mapBriefSwitch, mapBroken, mapBusy, mapCalm, mapCamera, mapDotsOrder, mapDotsRetry, mapEmpty, mapFog, mapFogPlates, mapFresh, mapGlassMotion, mapGoneFocus, mapHeaderDot, mapMarkHints, mapMarks, mapNoMap, mapPartKeys, mapPartRedraw, mapProjectGone, mapProjectRemoved, mapRefresher, mapPurposeMore, mapCaughtUp, mapCatchUpOlder, mapReview, mapScrubbed, mapSmallGaps, mapSpotlight, mapStale, mapSwitchSavesViews, mapTalksTo, readmeHero } from "./fixtures-map.ts";
+import { mapBadgeList, mapBase, mapCheckout, mapDefaultNoBanner, mapNotGit, mapBriefPairLight, mapBriefSwitch, mapBroken, mapBusy, mapCalm, mapCamera, mapDotsOrder, mapDotsRetry, mapEmpty, mapFog, mapFogPlates, mapFresh, mapGlassMotion, mapGoneFocus, mapHeaderDot, mapMarkHints, mapMarks, mapScan, mapScanIgnore, mapScanMerge, mapScanNoClaude, mapScanSwitch, mapDraftSteps, mapDrafting, mapDraftReview, mapDraftRedraft, mapDraftAccept, mapDraftPr, mapDraftPrMuted, mapDraftReplace, mapDraftWrite, mapKeepCurrent, mapPendingClosed, mapPendingOpen, mapPendingSteps, mapPartKeys, mapPartRedraw, mapProjectGone, mapProjectRemoved, mapRefresher, mapPurposeMore, mapCaughtUp, mapCatchUpOlder, mapReview, mapScrubbed, mapSmallGaps, mapSpotlight, mapStale, mapSwitchSavesViews, mapTalksTo, readmeHero } from "./fixtures-map.ts";
 import { mapFootprint, mapLatePlace, mapPanelBrief, mapPanelDiff, mapNotPlacedHint, mapPanelFieldHints, mapPanelFocus, mapPanelHead, mapPanelHistory, mapPanelLine2, mapPanelNoSession, mapPanelPeel, mapListFold, mapPanelSettings, mapPanelStory, mapPanelToggle, mapSheetClose, mapSheetExplained, mapSheetHere, mapSheetHolds, mapSheetKeptWidth, mapSheetResizeRedraw, mapSheetScrollShort, mapSheetStill, mapSheetUnratified, mapSheetWidth, mapToastBeside, mapTurnLight, mapPanelPatched, mapPanelAskStays, mapPanelBriefFoot } from "./fixtures-panel.ts";
 import { mapBackLaw, mapMicroWorld, mapMicroWorldBuilding, mapPreFlight, mapPreFlightOutside, mapPreFlightOutsideKept, mapPreFlightPalette, mapPreFlightPick, mapPreFlightStatus, mapRuns, mapRunsAnnounced, mapRunsBesideSheet, mapRunsPaused, mapTray, mapTrayAfterPush } from "./fixtures-runs.ts";
 import { mapBriefAlsoGroups, mapBriefAnnounce, mapBriefBar, mapBriefBold, mapBriefBoldUnpaired, mapBriefChapterLast, mapBriefChapterMid, mapBriefChapters, mapBriefCopied, mapBriefCopyByHand, mapBriefExplainBack, mapBriefExplained, mapBriefFigure, mapBriefGuard, mapBriefHeights, mapBriefMapCheck, mapBriefNoFacts, mapBriefReview, mapBriefStillTrue, mapBriefNoStaleBase, mapBriefOrderRight, mapBriefOrderSlots, mapBriefOrderWrong, mapBriefOverturn, mapBriefPartialFacts, mapBriefPick, mapBriefRatify, mapBriefRatifyDetail, mapBriefRatifyEvidence, mapBriefShort, mapBriefSince, mapBriefStaleBase, mapBriefStart, mapBriefStepCode, mapBriefStory, mapBriefTall, mapBriefTaller, mapBriefTallScroll, mapBriefUnconfirmed, mapBriefWhy, mapBriefWhyDecision, mapBriefWriting, mapCatchUp, mapCatchUpBold, mapCatchUpCard, mapCatchUpStage, mapCatchUpSummarising, mapCatchUpWriting, mapDiffClosed, mapDiffLitGhost, mapDiffRatifyLit, mapDiffRemoval, mapDiffRemovalBrief, mapDiffSplit, mapDiffSplitBrief, listBriefMark, railBriefReady } from "./fixtures-brief.ts";
@@ -251,8 +251,28 @@ export const fixtures = {
   mapDotsOrder,
   mapFresh,
   mapFreshNarrow: mapFresh,
-  mapNoMap,
-  mapNoMapNarrow: mapNoMap,
+  // The free scan of a repository with no map (#760): its grey plates and lines, Draft the map muted without claude, and the layout following the payload.
+  mapScan,
+  mapScanNarrow: mapScan,
+  mapScanMerge,
+  mapScanIgnore,
+  mapScanIgnoreNarrow: mapScanIgnore,
+  mapScanNoClaude,
+  mapScanSwitch,
+  // The Map draft (#763): the layout steps from scan to review, drafting with a group in, one checking and one failed, the review screen
+  // with a flag and the Core line, and Redraft this part relocking Accept, then Discard back to the scan.
+  mapDraftSteps,
+  mapDrafting,
+  mapDraftingNarrow: mapDrafting,
+  mapDraftReview,
+  mapDraftRedraft,
+  mapDraftAccept,
+  mapDraftAcceptNarrow: mapDraftAccept,
+  mapDraftReplace,
+  mapDraftWrite,
+  // Open a draft PR (#765): muted while gh is logged out, and its steps to the map waiting on the PR.
+  mapDraftPrMuted,
+  mapDraftPr,
   // The part sheet in the map: one scrolling column, a resizable width, and a click on the empty map closes it (#445).
   mapSheetScrollShort,
   // The sheet's purpose, then its held items with their key files (#483).
@@ -262,4 +282,17 @@ export const fixtures = {
   mapSheetKeptWidth,
   mapSheetClose,
   mapEmpty,
+  // The map's sources (#753): a checkout map with its check's problems, the default branch's with none, and a folder in no git repository.
+  mapCheckout,
+  mapCheckoutNarrow: mapCheckout,
+  mapDefaultNoBanner,
+  mapNotGit,
+  // A map waiting on its draft PR, open, then closed unmerged with its ways forward, and those pressed (#765).
+  mapPendingOpen,
+  mapPendingClosed,
+  mapPendingClosedNarrow: mapPendingClosed,
+  mapPendingSteps,
+  // Keep it current (#766): the head's button and its card of two snippets.
+  mapKeepCurrent,
+  mapKeepCurrentNarrow: mapKeepCurrent,
 } satisfies Record<string, () => Fixture>;

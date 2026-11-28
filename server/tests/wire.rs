@@ -12,7 +12,7 @@ use studio_server::{
     back_a_law::{LawPatch, PatchState, Proof},
     ci_laws::{self, Ci},
     fog::{ChapterRead, Entry, FogState, PrRead, Strength},
-    map::{MapState, Mark, MarkWhy, Status, UserState, View},
+    map::{MapState, Mark, MarkWhy, PendingPr, ReadFrom, Status, UserState, View},
     micro_worlds::{Phase, View as WorldView, WorldsState},
     pr_briefs::BriefInfo,
     prs::Ready,
@@ -206,6 +206,9 @@ fn empty(status: Status) -> MapState {
         project: "/repo".into(),
         status,
         source: None,
+        from: None,
+        pending: None,
+        problems: Vec::new(),
         reference: None,
         commit: None,
         note: None,
@@ -325,6 +328,7 @@ fn runs() -> Runs {
         run(RunState::Running, Kind::BackLaw, None),
         run(RunState::Queued, Kind::MicroWorld, None),
         run(RunState::Queued, Kind::MapReview, None),
+        run(RunState::Running, Kind::FirstMap, None),
     ];
     list.extend(ends.map(|end| run(RunState::Ended, Kind::BackLaw, Some(end))));
     let warning = "The sandbox gate has not run on Claude Code 2.1.399 (last passed on 2.1.326).";
@@ -393,6 +397,29 @@ fn the_wire_samples_of_the_map_view_are_written_for_tsc() {
                 }),
                 micro_worlds: worlds(),
                 law_patches: law_patches(),
+                ..empty(Status::Loaded)
+            }),
+        ));
+    }
+    // A map waiting on its draft PR, then one whose PR closed, with Open a draft PR muted (#765).
+    for (closed, pr_muted) in [
+        (false, None),
+        (
+            true,
+            Some("`gh` is not logged in: run `gh auth login`".into()),
+        ),
+    ] {
+        samples.push((
+            "MapState",
+            json(MapState {
+                source: Some("{ \"parts\": [] }".into()),
+                from: Some(ReadFrom::PendingPr),
+                pending: Some(PendingPr {
+                    number: 7,
+                    closed,
+                    path: "/repo/system-map.json".into(),
+                    pr_muted,
+                }),
                 ..empty(Status::Loaded)
             }),
         ));
@@ -1110,6 +1137,53 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             }),
         ),
         ("About", json(studio_server::about())),
+        ("MapDraft", json(map_draft())),
+        (
+            "MapDraft",
+            json(studio_server::map_draft::MapDraftView {
+                ready: true,
+                pr_muted: Some("GitHub's CLI, `gh`, was not found".into()),
+                ..map_draft()
+            }),
+        ),
+        (
+            "MapPrOpened",
+            json(studio_server::map_draft::OpenedPr {
+                number: 7,
+                url: "https://github.com/someone/app/pull/7".into(),
+            }),
+        ),
+        (
+            "MapAccepted",
+            json(studio_server::map_draft::Accepted::Written {
+                path: "/w/app/system-map.json".into(),
+            }),
+        ),
+        (
+            "MapAccepted",
+            json(studio_server::map_draft::Accepted::Replace {
+                path: "/w/app/system-map.json".into(),
+                problem: "expected `,` or `}` at line 1 column 13".into(),
+                seen: "00c0ffee00c0ffee".into(),
+            }),
+        ),
+        (
+            "MapScan",
+            json(studio_server::map_scan::MapScan {
+                map: r#"{"version":2,"parts":[],"links":[]}"#.into(),
+                files: BTreeMap::from([("app".into(), 2)]),
+                read_languages: vec!["TypeScript".into()],
+                unread_languages: vec!["Ruby".into()],
+                claude: true,
+                ignore_candidates: vec![system_map::IgnoreCandidate {
+                    path: "vendor/".into(),
+                    ticked: true,
+                }],
+                loose_files: vec!["src/index.ts".into()],
+                loose_tests: vec!["tests/app.test.ts".into()],
+                splits: BTreeMap::from([("app".into(), vec!["src/app/core/".into()])]),
+            }),
+        ),
     ];
     // The page's version is the package's, which the release bumps with npm's (#512).
     assert_eq!(
@@ -1141,9 +1215,61 @@ fn the_wire_samples_of_the_map_replies_are_written_for_tsc() {
             "BackLawStarted",
             "LawPatchOpened",
             "NewLaw",
+            "MapScan",
+            "MapDraft",
+            "MapAccepted",
+            "MapPrOpened",
         ],
         &samples,
     );
+}
+
+/// A Map draft with a group of each state, one failed with why, a flagged verdict and an item left out.
+fn map_draft() -> studio_server::map_draft::MapDraftView {
+    use studio_server::map_draft::{GroupState, GroupView, MapDraftView, NotWritten};
+    let group = |part: &str, state, why: Option<&str>, redraft| GroupView {
+        parts: vec![part.into()],
+        state,
+        why: why.map(Into::into),
+        redraft,
+    };
+    MapDraftView {
+        map: r#"{"version":2,"parts":[],"links":[]}"#.into(),
+        groups: vec![
+            group("a", GroupState::Writing, None, false),
+            group("b", GroupState::Checking, None, false),
+            group("c", GroupState::Done, None, false),
+            group(
+                "d",
+                GroupState::WriterFailed,
+                Some("The writer's answer held no JSON"),
+                false,
+            ),
+            group(
+                "c",
+                GroupState::ReviewerFailed,
+                Some("The reviewer stopped at its time limit"),
+                true,
+            ),
+        ],
+        verdicts: BTreeMap::from([(
+            "c".into(),
+            studio_server::map_review::Judged {
+                id: "part:c/purpose".into(),
+                verdict: "contradicted".into(),
+                why: "It writes to stdout.".into(),
+                cites: vec!["c/log.ts:37".into()],
+                flagged: true,
+            },
+        )]),
+        not_written: vec![NotWritten {
+            what: "c: rotates its logs".into(),
+            why: "No code shows it.".into(),
+        }],
+        ready: false,
+        path: "/w/app/system-map.json".into(),
+        pr_muted: None,
+    }
 }
 
 /// `name` as the page writes it: `agent_id` is `agentId`. `api::call` turns it back.
@@ -1226,7 +1352,7 @@ fn command_arguments() -> Vec<(String, Vec<String>)> {
 // @law: wire-types-agree
 /// The page's `Commands` (`ui/types.ts`) against the server's handlers (#554): `scripts/wire/server-args.ts` lists each command's
 /// argument names as `api::call` reads them, and `tsc -p scripts/wire` fails when the page has a command the server lacks, lacks one it
-/// has, or names a command's arguments otherwise.
+/// has, or names a command's arguments otherwise. `register_folder` is a second plotkeeper's, never the page's.
 #[test]
 fn the_command_arguments_are_written_for_tsc() {
     use std::fmt::Write;
@@ -1256,8 +1382,8 @@ fn the_command_arguments_are_written_for_tsc() {
     }
     ts.push_str(
         "};\n\n\
-         // The commands the transport posts itself, not through `invoke`.\n\
-         type Own = \"log\" | \"page_focus\";\n\
+         // The commands posted outside `invoke`: the transport's own, and a second plotkeeper's `register_folder` (#756).\n\
+         type Own = \"log\" | \"page_focus\" | \"register_folder\";\n\
          type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;\n\
          // A command with no arguments takes `Record<string, never>`, whose keys are any string.\n\
          type Names<T> = string extends keyof T ? never : keyof T;\n\
@@ -1265,7 +1391,7 @@ fn the_command_arguments_are_written_for_tsc() {
          export const names: { [C in Command]: C extends keyof Server ? Same<Names<Args<C>>, Server[C]> : false } = {\n",
     );
     for (command, _) in &commands {
-        if command != "log" && command != "page_focus" {
+        if !["log", "page_focus", "register_folder"].contains(&command.as_str()) {
             writeln!(ts, "  {command}: true,").expect("a String takes a write");
         }
     }

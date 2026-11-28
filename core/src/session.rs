@@ -211,8 +211,9 @@ impl Identity {
 }
 
 /// The project a folder whose root is `root` belongs to (spec #659): a task's worktree
-/// `<main>/.claude/worktrees/<task>` belongs to `<main>`, any other root to itself.
-pub(crate) fn project_of(root: &str) -> &str {
+/// `<main>/.claude/worktrees/<task>` belongs to `<main>`, any other root to itself. The server's start-up registration
+/// maps the folder plotkeeper started in through it too (spec #753, "Projects").
+pub fn project_of(root: &str) -> &str {
     const MARK: &str = "/.claude/worktrees/";
     match root.rfind(MARK) {
         Some(at) if at > 0 && root.len() > at + MARK.len() => &root[..at],

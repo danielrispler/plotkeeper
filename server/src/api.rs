@@ -167,6 +167,44 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
         "turn_reply" => out(crate::turn_reply(app, arg(a, "id")?, arg(a, "index")?)),
         "agent_summary" => out(crate::agent_summary(app, arg(a, "agent_id")?)),
         "map_state" => res(crate::map_state(arc, arg(a, "project")?, arg(a, "fetch")?)),
+        "map_scan" => res(crate::map_scan::map_scan(arg(a, "project")?)),
+        "map_scan_edit" => res(crate::map_scan::map_scan_edit(
+            arg(a, "project")?,
+            arg(a, "map")?,
+            arg(a, "edit")?,
+        )),
+        "map_draft" => out(app.drafts.view(&arg::<String>(a, "project")?)),
+        "map_draft_start" => res(app
+            .drafts
+            .start(&arg::<String>(a, "project")?, arg(a, "skeleton")?)),
+        "map_draft_retry" => res(app
+            .drafts
+            .retry(&arg::<String>(a, "project")?, arg(a, "group")?)),
+        "map_draft_redraft" => res(app
+            .drafts
+            .redraft(&arg::<String>(a, "project")?, &arg::<String>(a, "part")?)),
+        "map_draft_edit" => res(app.drafts.edit(
+            &arg::<String>(a, "project")?,
+            &arg::<String>(a, "part")?,
+            crate::map_draft::Edit {
+                name: arg(a, "name")?,
+                caption: arg(a, "caption")?,
+                purpose: arg(a, "purpose")?,
+                tier: arg(a, "tier")?,
+            },
+        )),
+        "map_draft_discard" => res(app.drafts.discard(&arg::<String>(a, "project")?)),
+        "map_draft_accept" => res(app.drafts.accept(
+            &arg::<String>(a, "project")?,
+            arg::<Option<String>>(a, "replace")?.as_deref(),
+        )),
+        "map_draft_pr" => res(app.drafts.open_pr(&arg::<String>(a, "project")?)),
+        "map_pending_write" => res(app.drafts.pending_write(
+            &arg::<String>(a, "project")?,
+            arg::<Option<String>>(a, "replace")?.as_deref(),
+        )),
+        "map_pending_pr" => res(app.drafts.pending_pr(&arg::<String>(a, "project")?)),
+        "map_pending_discard" => res(app.drafts.pending_discard(&arg::<String>(a, "project")?)),
         "map_know" => res(crate::map::map_know(arg(a, "project")?, arg(a, "part")?)),
         "map_refresher" => res(crate::map::map_refresher(
             arg(a, "project")?,
@@ -343,6 +381,7 @@ pub fn call(app: &Arc<App>, page: &dyn Page, name: &str, args: Value) -> Result<
             arg(a, "decision")?,
         )),
         "projects" => out(app.projects.list()),
+        "register_folder" => res(crate::register_folder(app, &arg::<String>(a, "folder")?)),
         "remove_project" => res(app
             .projects
             .remove(&arg::<String>(a, "path")?, studio_understanding::millis())),
