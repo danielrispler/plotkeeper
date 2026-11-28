@@ -127,5 +127,6 @@ fn scan_prints_the_free_scan_as_text_or_json_and_exits_zero() {
     assert_eq!(json.status.code(), Some(0), "{json:?}");
     let value: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
     assert_eq!(value["map"]["parts"][0]["paths"][0], "alpha/");
+    // The tracked map is never loose: the check ignores it with no entry for it.
     assert_eq!(value["loose_files"], serde_json::json!([]));
 }

@@ -435,6 +435,8 @@ test("the loose files are offered by folder, each folder with the names of its f
     [["src/index.ts"], [["src/", "index.ts"]]],
     [["src/index.ts", "main.go", "src/cli.ts", "example/demo/run.ts"], [["The root", "main.go"], ["example/demo/", "run.ts"], ["src/", "cli.ts and index.ts"]]],
     [["t/a.ts", "t/b.ts", "t/c.ts", "t/d.ts", "t/e.ts"], [["t/", "a.ts, b.ts, c.ts and 2 more"]]],
+    // Files that are not code, hidden ones too, are rows like any other (#753: the check asks a home for every tracked file).
+    [["README.md", ".claude/settings.json", "docs/guide.md"], [["The root", "README.md"], [".claude/", "settings.json"], ["docs/", "guide.md"]]],
   ];
   for (const [files, rows] of cases) {
     const groups = looseGroups(files);
