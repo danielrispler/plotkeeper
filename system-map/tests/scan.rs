@@ -105,6 +105,21 @@ fn parts_come_from_the_folder_that_holds_most_of_the_code() {
             vec!["a/", "b/"],
             vec![],
         ),
+        (
+            "files that are not code, hidden ones too, are loose when no part holds them",
+            files(&[
+                code("src/a", 2),
+                code("src/b", 2),
+                vec![
+                    ("src/a/notes.md".to_string(), "x\n"),
+                    ("docs/guide.md".to_string(), "x\n"),
+                    (".claude/settings.json".to_string(), "{}\n"),
+                    ("README.md".to_string(), "x\n"),
+                ],
+            ]),
+            vec!["src/a/", "src/b/"],
+            vec![".claude/settings.json", "README.md", "docs/guide.md"],
+        ),
     ];
     for (name, tree, parts, loose) in cases {
         let f = found(&tree);
@@ -351,6 +366,7 @@ fn observability_sdks_shape_keeps_its_loose_files_and_its_tests_apart() {
     assert_eq!(
         strings(&f.loose),
         [
+            "package.json",
             "scripts/check-node.cjs",
             "src/config.type.ts",
             "src/global-registry.ts",
@@ -417,13 +433,49 @@ fn a_language_no_extractor_reads_is_detected_and_named() {
 }
 
 #[test]
-fn the_proposed_map_passes_the_check() {
-    let tree = files(&[code("src/a", 2), code("src/b", 2)]);
-    let files: Vec<(&str, &str)> = tree.iter().map(|(f, t)| (f.as_str(), *t)).collect();
-    let (_dir, root) = tracked(&files);
-    let scan = system_map::scan(Path::new(&root)).unwrap();
-    let names = tree.iter().map(|(f, _)| f.clone()).collect();
-    let report = system_map::check_text(Path::new(&root), names, &scan.map.to_string());
-    assert!(report.problems.is_empty(), "{:?}", report.problems);
-    assert_eq!(scan.map["parts"][0]["tier"], "interface");
+fn the_proposed_map_fails_the_check_only_on_the_loose_files_and_tests() {
+    /// A case: its name, the files, and the files the check finds no part for.
+    type Case = (&'static str, Vec<(String, &'static str)>, Vec<&'static str>);
+    let cases: Vec<Case> = vec![
+        (
+            "code only: it passes",
+            files(&[code("src/a", 2), code("src/b", 2)]),
+            vec![],
+        ),
+        (
+            "files that are not code, outside every part",
+            files(&[
+                code("src/a", 2),
+                code("src/b", 2),
+                vec![
+                    ("docs/guide.md".to_string(), "x\n"),
+                    (".changeset/x.md".to_string(), "x\n"),
+                    ("tests/data.json".to_string(), "{}\n"),
+                ],
+            ]),
+            vec![".changeset/x.md", "docs/guide.md", "tests/data.json"],
+        ),
+    ];
+    for (name, tree, unowned) in cases {
+        let listed: Vec<(&str, &str)> = tree.iter().map(|(f, t)| (f.as_str(), *t)).collect();
+        let (_dir, root) = tracked(&listed);
+        let scan = system_map::scan(Path::new(&root)).unwrap();
+        let names = tree.iter().map(|(f, _)| f.clone()).collect();
+        let report = system_map::check_text(Path::new(&root), names, &scan.map.to_string());
+        let mut failed: Vec<&str> = report
+            .problems
+            .iter()
+            .map(|p| {
+                p.split_once(": tracked, but no part owns it")
+                    .map_or(p.as_str(), |(f, _)| f)
+            })
+            .collect();
+        failed.sort_unstable();
+        assert_eq!(failed, unowned, "{name}: {:?}", report.problems);
+        let mut loose: Vec<&str> = strings(&scan.loose_files);
+        loose.extend(strings(&scan.loose_tests));
+        loose.sort_unstable();
+        assert_eq!(loose, unowned, "{name}: the scan lists them as loose");
+        assert_eq!(scan.map["parts"][0]["tier"], "interface", "{name}");
+    }
 }

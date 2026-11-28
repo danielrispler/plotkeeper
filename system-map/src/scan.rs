@@ -3,7 +3,8 @@
 //!
 //! The rule is the lean rule of 2026-11-24 with four additions: step into the folder that holds most of the code (80% of
 //! its parent's code files); take the members of a tracked workspace manifest, and each folder holding a Go `package
-//! main`, as parts; report the loose files and tests no part owns; list the folders that look like reference copies.
+//! main`, as parts; report the loose files (code or not) and tests no part owns; list the folders that look like reference
+//! copies.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -27,9 +28,9 @@ pub struct Scan {
     pub map: Value,
     /// Folders that look like copies or vendored code, ticked when the scan is sure.
     pub ignore_candidates: Vec<IgnoreCandidate>,
-    /// Code files no part owns.
+    /// Tracked files no part owns and no ignored folder holds, code or not, tests apart.
     pub loose_files: Vec<String>,
-    /// Test files no part owns.
+    /// Test files no part owns and no ignored folder holds.
     pub loose_tests: Vec<String>,
     /// Languages of the code (tests apart) that an extractor reads, so the scan's links cover them.
     pub read_languages: Vec<String>,
@@ -478,11 +479,14 @@ fn scan_files(root: &Path, files: &[String]) -> Scan {
         candidates.insert(folder, false);
     }
 
-    let owned = |file: &str| parts.iter().any(|p| under(file, p));
+    // Every tracked file no part owns and no ignored folder holds, code or not, hidden or not: the check asks a home for each,
+    // the map file apart, which it ignores with no entry for it.
+    let owned = |file: &str| file == crate::MAP_FILE || parts.iter().any(|p| under(file, p));
     let loose = |tests: bool| -> Vec<String> {
-        code.iter()
+        files
+            .iter()
             .filter(|f| is_test(f) == tests && !owned(f) && in_play(f, &ticked))
-            .map(ToString::to_string)
+            .cloned()
             .collect()
     };
     let (loose_files, loose_tests) = (loose(false), loose(true));

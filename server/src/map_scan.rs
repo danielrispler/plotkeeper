@@ -21,9 +21,9 @@ pub struct MapScan {
     pub claude: bool,
     /// The folders that look like copies or vendored code, each ticked while the skeleton ignores it.
     pub ignore_candidates: Vec<system_map::IgnoreCandidate>,
-    /// The code files no part owns, tests apart.
+    /// The tracked files no part owns and no ignored folder holds, code or not, tests apart: the check asks a home for each.
     pub loose_files: Vec<String>,
-    /// The tests no part owns.
+    /// The tests no part owns and no ignored folder holds.
     pub loose_tests: Vec<String>,
     /// The subfolders each part that Split by subfolders can split would split into, by part id.
     pub splits: BTreeMap<String, Vec<String>>,
@@ -144,8 +144,9 @@ fn index(map: &Value, id: &str) -> Option<usize> {
     parts_of(map).iter().position(|part| part["id"] == id)
 }
 
+/// Whether `file` is ignored by `check`'s rule: the map file always, else a pattern of the skeleton's `ignored` covers it.
 fn ignored(map: &Value, file: &str) -> bool {
-    strings(&map["ignored"]).any(|pattern| covers(pattern, file))
+    file == system_map::MAP_FILE || strings(&map["ignored"]).any(|pattern| covers(pattern, file))
 }
 
 /// The id of the part that owns `file`, by `check`'s rule: none when it is ignored, else the last part with a path covering it.
@@ -226,11 +227,7 @@ fn home(
         return Err("no loose files to give".into());
     }
     for file in loose {
-        if !files.contains(file)
-            || !system_map::is_code(file)
-            || ignored(map, file)
-            || owner(map, file).is_some()
-        {
+        if !files.contains(file) || ignored(map, file) || owner(map, file).is_some() {
             return Err(format!("{file} is not a loose file"));
         }
     }
@@ -356,8 +353,7 @@ fn screen_of(
     map["links"] = import_links(&report);
     let loose = |tests: bool| -> Vec<String> {
         let free = |file: &&String| {
-            system_map::is_code(file)
-                && system_map::is_test(file) == tests
+            system_map::is_test(file) == tests
                 && !ignored(&map, file)
                 && owner(&map, file).is_none()
         };
@@ -506,6 +502,7 @@ mod tests {
                 "import { b } from \"../lib/b\";\n",
             ),
             ("src/index.ts", "export const i = 1;\n"),
+            ("docs/guide.md", "# Guide\n"),
             ("tests/b.test.ts", "import { b } from \"../src/lib/b\";\n"),
             ("vendor/x/v.ts", "import { b } from \"../../src/lib/b\";\n"),
         ];
@@ -526,6 +523,7 @@ mod tests {
             part("snapshot-copy", &["src/snapshot-copy/"]),
         );
         let first_links = vec![link("app", "lib"), link("snapshot-copy", "lib")];
+        let loose = s(&["docs/guide.md", "src/index.ts"]);
         let cases: Vec<(&str, Option<Edit>, Seen)> = vec![
             (
                 "the scan as it came: a sure candidate ticked, a loose file and a loose test, lib splittable",
@@ -533,7 +531,7 @@ mod tests {
                 (
                     vec![app.clone(), lib.clone(), copy.clone()],
                     first_links.clone(),
-                    s(&["src/index.ts"]),
+                    loose.clone(),
                     s(&["tests/b.test.ts"]),
                     s(&["vendor/"]),
                     lib_splits.clone(),
@@ -548,7 +546,7 @@ mod tests {
                 (
                     vec![app.clone(), lib.clone()],
                     vec![link("app", "lib")],
-                    s(&["src/index.ts"]),
+                    loose.clone(),
                     s(&["tests/b.test.ts"]),
                     s(&["src/snapshot-copy/", "vendor/"]),
                     lib_splits.clone(),
@@ -572,7 +570,7 @@ mod tests {
                         link("snapshot-copy", "lib"),
                         link("vendor", "lib"),
                     ],
-                    s(&["src/index.ts"]),
+                    loose.clone(),
                     s(&["tests/b.test.ts"]),
                     s(&[]),
                     lib_splits.clone(),
@@ -591,7 +589,27 @@ mod tests {
                         copy.clone(),
                     ],
                     first_links.clone(),
-                    s(&[]),
+                    s(&["docs/guide.md"]),
+                    s(&["tests/b.test.ts"]),
+                    s(&["vendor/"]),
+                    lib_splits.clone(),
+                ),
+            ),
+            (
+                "a loose file that is not code given a new part makes one of its folder",
+                Some(Edit::Home {
+                    files: s(&["docs/guide.md"]),
+                    part: None,
+                }),
+                (
+                    vec![
+                        app.clone(),
+                        lib.clone(),
+                        copy.clone(),
+                        part("docs", &["docs/"]),
+                    ],
+                    first_links.clone(),
+                    s(&["src/index.ts"]),
                     s(&["tests/b.test.ts"]),
                     s(&["vendor/"]),
                     lib_splits.clone(),
@@ -611,7 +629,7 @@ mod tests {
                         part("tests", &["tests/"]),
                     ],
                     first_links.clone(),
-                    s(&["src/index.ts"]),
+                    loose.clone(),
                     s(&[]),
                     s(&["vendor/"]),
                     lib_splits.clone(),
@@ -626,7 +644,7 @@ mod tests {
                 (
                     vec![part("lib", &["src/lib/", "src/app/"]), copy.clone()],
                     vec![link("snapshot-copy", "lib")],
-                    s(&["src/index.ts"]),
+                    loose.clone(),
                     s(&["tests/b.test.ts"]),
                     s(&["vendor/"]),
                     lib_splits.clone(),
@@ -648,7 +666,7 @@ mod tests {
                         link("app", "lib"),
                         link("snapshot-copy", "lib"),
                     ],
-                    s(&["src/index.ts"]),
+                    loose.clone(),
                     s(&["tests/b.test.ts"]),
                     s(&["vendor/"]),
                     BTreeMap::new(),
