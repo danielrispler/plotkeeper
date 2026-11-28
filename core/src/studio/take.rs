@@ -517,6 +517,15 @@ impl Take<'_> {
                 self.blocked_answered(tool, id, answer);
             }
             Happened::TurnStart { prompt, origin } => self.turn_start(prompt, origin.as_ref()),
+            // A result that joins a running turn names its task on a wake-up's (#779); one the hook
+            // took late, or that lands after its turn's end, is of a turn already past.
+            Happened::TasksReported(_)
+                if self.session.in_turn()
+                    && !event.has(|h| matches!(h, Happened::TurnStart { .. } | Happened::Late)) =>
+            {
+                let tasks = self.reported_tasks();
+                self.session.wake_up_took(&tasks);
+            }
             // A reply in an event of its own waits for its turn's end (#362). Only the main agent's: a
             // subagent's reply (Claude Code's `SubagentStop`) is never its parent turn's.
             Happened::Reply(reply)
@@ -666,10 +675,18 @@ impl Take<'_> {
 
     /// A prompt opens a wait, also after an interrupt, which fires no `Stop`.
     fn turn_start(&mut self, prompt: &str, origin: Option<&Origin>) {
+        let reported = self.reported_tasks();
+        // An adapter's wake-up that says which tasks it took names them all, the first as its sender
+        // (#779).
+        let told = origin == Some(&Origin::WakeUp)
+            && self.event.has(|h| matches!(h, Happened::TasksReported(_)));
         let session = &mut *self.session;
         session.reply.clear();
         let sender = match origin {
             Some(Origin::Daniel) => Sender::Daniel,
+            Some(Origin::WakeUp) if told => {
+                Sender::WakeUp(reported.first().cloned().unwrap_or_default())
+            }
             Some(Origin::WakeUp) => Sender::WakeUp(session.woken_by()),
             None => session.sender(prompt),
         };
@@ -712,7 +729,20 @@ impl Take<'_> {
                 session.unblock();
             }
             session.reopen_turn();
+            // Claude Code's wake-ups keep the name its markup gives.
+            if told {
+                session.wake_up_took(&reported);
+            }
         }
+    }
+
+    /// The ids of the tasks the event reports on.
+    fn reported_tasks(&self) -> Vec<String> {
+        self.event
+            .reported()
+            .iter()
+            .map(|(id, _)| id.clone())
+            .collect()
     }
 
     /// A background retry ends at the notification that names its task, one of perhaps several in

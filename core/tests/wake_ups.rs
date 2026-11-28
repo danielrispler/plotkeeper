@@ -50,16 +50,21 @@ fn prompt(prompt: &str) -> String {
 
 #[test]
 fn a_wake_up_from_a_task_with_no_subagent_names_it_by_its_short_id() {
-    let mut studio = replay(DAY);
+    // `brh86k1fz` is the day's background command, which no subagent record names. A Claude Code
+    // wake-up that reports two tasks still names the first its markup knows, as OpenCode's names
+    // all it took (#779) only from its own lines.
+    let notification = common::task_notification("brh86k1fz", "completed");
+    let two = notification.clone() + &common::task_notification("zzzzzzzzz", "completed");
+    for (case, text) in [("one task", notification), ("two tasks", two)] {
+        let mut studio = replay(DAY);
+        studio.apply(&prompt(&text));
 
-    // `brh86k1fz` is the day's background command, which no subagent record names.
-    studio.apply(&prompt(&common::task_notification(
-        "brh86k1fz",
-        "completed",
-    )));
-
-    let session = studio.session(IMPLEMENT_SPEC).unwrap();
-    assert_eq!(session.returned.as_deref(), Some("worker brh86 returned"));
+        let session = studio.session(IMPLEMENT_SPEC).unwrap();
+        let returned = Some("worker brh86 returned");
+        assert_eq!(session.returned.as_deref(), returned, "{case}");
+        let turn = session.turns.last().unwrap();
+        assert_eq!(Some(turn.prompt.as_str()), returned, "{case}");
+    }
 }
 
 /// The senders of the prompts after the day's 18.

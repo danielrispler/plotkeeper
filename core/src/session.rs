@@ -290,6 +290,10 @@ pub struct Turn {
     /// by", never as Daniel's. A turn stored before it reads as his.
     #[serde(default)]
     pub wake_up: bool,
+    /// The tasks a wake-up's turn took the results of, in order, for an agent that says which
+    /// (OpenCode, #779); empty for any other turn.
+    #[serde(skip_serializing_if = "crate::saved::unsaved", default)]
+    pub(crate) woken_by: Vec<String>,
     /// The id its `Stop` gives a card or a summary on it (`Stopped::card`); `None` until it stopped.
     pub id: Option<String>,
     /// The first line of its final reply, from its `Stop`.
@@ -1076,6 +1080,32 @@ impl Session {
     pub(crate) fn woken_by(&self) -> String {
         let last = self.agents.iter().max_by_key(|a| a.agent.last_event_at);
         last.map(|a| a.agent.id.clone()).unwrap_or_default()
+    }
+
+    /// Names the latest turn, a wake-up's, after `tasks` too, whose results it took (#779): "worker
+    /// A returned", "workers A and B returned", or "background job returned" when it took none of a
+    /// subagent's. A turn Daniel prompted keeps its prompt.
+    pub(crate) fn wake_up_took(&mut self, tasks: &[String]) {
+        let Some(turn) = self.turns.last_mut().filter(|t| t.wake_up) else {
+            return;
+        };
+        for task in tasks {
+            if !turn.woken_by.contains(task) {
+                turn.woken_by.push(task.clone());
+            }
+        }
+        let woken_by = turn.woken_by.clone();
+        let names: Vec<&str> = woken_by.iter().map(|id| self.agent_name(id)).collect();
+        let label = match names.as_slice() {
+            [] => "background job returned".into(),
+            [name] => format!("worker {name} returned"),
+            [first @ .., last] => format!("workers {} and {last} returned", first.join(", ")),
+        };
+        let turn = self.turns.last_mut().expect("found above");
+        turn.prompt.clone_from(&label);
+        if self.returned.is_some() {
+            self.returned = Some(label);
+        }
     }
 
     /// Who sent `prompt`. A wake-up names a known task id of the session in markup the studio
