@@ -221,6 +221,9 @@ impl Harness for Claude {
 /// (`data`, which holds its token) or of a credential folder. `autoAllowBashIfSandboxed` must stay `false`: with `true`,
 /// commands outside the allow list ran. `allowLocalBinding` lets a project's tests serve on loopback, which plotkeeper's
 /// own need; it also lets a run's tools reach any server on the Mac's loopback, a limit v1 accepts.
+///
+/// `denyWrite` names Claude Code's shared temp folder, [`shared_tmp`]: the tools' `TMPDIR` is the run's own folder
+/// ([`private_tmp`]), but should Claude Code fall back to the shared one, their writes there are refused (#773).
 pub fn sandbox_settings(data: &Path) -> serde_json::Value {
     serde_json::json!({
         "disableAllHooks": true,
@@ -230,12 +233,27 @@ pub fn sandbox_settings(data: &Path) -> serde_json::Value {
             "allowUnsandboxedCommands": false,
             "autoAllowBashIfSandboxed": false,
             "network": { "allowLocalBinding": true },
-            "filesystem": { "denyRead": [
-                data.to_string_lossy(), "~/.claude", "~/.claude.json", "~/.ssh", "~/.aws", "~/.config/gh", "~/.npmrc",
-                "~/.netrc", "~/.cargo/credentials.toml", "~/.gnupg", "~/.kube",
-            ] },
+            "filesystem": {
+                "denyRead": [
+                    data.to_string_lossy(), "~/.claude", "~/.claude.json", "~/.ssh", "~/.aws", "~/.config/gh",
+                    "~/.npmrc", "~/.netrc", "~/.cargo/credentials.toml", "~/.gnupg", "~/.kube",
+                ],
+                "denyWrite": shared_tmp(),
+            },
         },
     })
+}
+
+/// Claude Code's per-user temp folder, `/tmp/claude-<uid>`, which every session shares and keeps its scratchpad in, and
+/// on macOS its `/private/tmp` form too, the path `/tmp` leads to. No run and no proof may write there.
+pub fn shared_tmp() -> Vec<PathBuf> {
+    // SAFETY: getuid has no preconditions and cannot fail.
+    let name = format!("claude-{}", unsafe { libc::getuid() });
+    let mut shared = vec![Path::new("/tmp").join(&name)];
+    if cfg!(target_os = "macos") {
+        shared.push(Path::new("/private/tmp").join(&name));
+    }
+    shared
 }
 
 /// The git commands a run's shell may use: reading, and staging inside its own clone. Never a commit, a push or `gh`.

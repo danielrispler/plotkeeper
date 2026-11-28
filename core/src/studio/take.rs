@@ -167,7 +167,8 @@ struct Take<'a> {
 }
 
 impl Take<'_> {
-    /// The process facts every event carries: its pid, mode, model, branch and transcript format.
+    /// The process facts every event carries: its pid, mode, model, branch, context size and
+    /// transcript format.
     fn follow_process(&mut self) {
         let (session, event) = (&mut *self.session, self.event);
         // A deleted session that starts again, by a resume, is back in the list; a late end is not.
@@ -187,6 +188,9 @@ impl Take<'_> {
         }
         if let Some(branch) = event.branch() {
             session.transcript.branch = Some(branch.into());
+        }
+        if let Some(tokens) = event.context() {
+            session.transcript.context = Some(transcript::Context { tokens });
         }
         session.transcript_file.format = event.capabilities.transcript_format;
     }

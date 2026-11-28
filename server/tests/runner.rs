@@ -242,10 +242,16 @@ fn the_claude_command_holds_the_flags_the_tools_and_the_sandbox_block() {
                 "allowUnsandboxedCommands": false,
                 "autoAllowBashIfSandboxed": false,
                 "network": { "allowLocalBinding": true },
-                "filesystem": { "denyRead": [
-                    "/home/d/Library/Application Support/plotkeeper", "~/.claude", "~/.claude.json", "~/.ssh", "~/.aws",
-                    "~/.config/gh", "~/.npmrc", "~/.netrc", "~/.cargo/credentials.toml", "~/.gnupg", "~/.kube",
-                ] },
+                "filesystem": {
+                    "denyRead": [
+                        "/home/d/Library/Application Support/plotkeeper", "~/.claude", "~/.claude.json", "~/.ssh",
+                        "~/.aws", "~/.config/gh", "~/.npmrc", "~/.netrc", "~/.cargo/credentials.toml", "~/.gnupg",
+                        "~/.kube",
+                    ],
+                    // The shared temp folder, where every session keeps its scratchpad: should Claude Code fall back to
+                    // it as the tools' `TMPDIR`, they still cannot write there (#773).
+                    "denyWrite": shared_tmp(),
+                },
             },
         })
     );
@@ -276,6 +282,20 @@ fn the_claude_command_holds_the_flags_the_tools_and_the_sandbox_block() {
         command.env.get("CLAUDE_CODE_TMPDIR").map(String::as_str),
         Some(tmp.to_str().unwrap())
     );
+}
+
+/// Claude Code's shared temp folder, `/tmp/claude-<uid>`, and on macOS its `/private/tmp` form too; the uid is the owner
+/// of a folder the test makes.
+fn shared_tmp() -> Vec<String> {
+    use std::os::unix::fs::MetadataExt;
+    let uid = fs::metadata(tempfile::tempdir().unwrap().path())
+        .unwrap()
+        .uid();
+    let mut shared = vec![format!("/tmp/claude-{uid}")];
+    if cfg!(target_os = "macos") {
+        shared.push(format!("/private/tmp/claude-{uid}"));
+    }
+    shared
 }
 
 #[test]
