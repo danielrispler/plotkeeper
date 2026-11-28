@@ -670,10 +670,12 @@ button.tray-row { display: block; width: 100%; font: inherit; color: inherit; te
 .run-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--sp-3); align-items: baseline; padding: var(--sp-3); border-radius: var(--radius); }
 .run-title { font-weight: 500; }
 .run-row[data-state="queued"] .run-title { color: var(--muted); }
-.run-note, .run-denials, .run-copied, .run-row .ratify-prompt { grid-column: 1 / -1; }
-.run-note, .run-denials, .run-copied, .runs-paused { font-size: var(--size-xs); color: var(--faint); }
+.run-note, .run-warning, .run-denials, .run-copied, .run-row .ratify-prompt { grid-column: 1 / -1; }
+.run-note, .run-warning, .run-denials, .run-copied, .runs-paused { font-size: var(--size-xs); color: var(--faint); }
 .run-denials { margin: var(--sp-2) 0 0; padding-inline-start: var(--sp-5); font-family: var(--mono); overflow-wrap: anywhere; }
 .run-copied { margin: var(--sp-2) 0 0; }
+/* An ungated Claude Code (#774): a caution, not a need, so no colour either; a step stronger than the note. */
+.run-warning { margin: var(--sp-1) 0 0; color: var(--muted); }
 .run-actions { grid-column: 2; grid-row: 1; display: inline-flex; gap: var(--sp-2); }
 .runs-paused { display: flex; align-items: baseline; gap: var(--sp-3); margin: 0; padding: 0 var(--sp-3); color: var(--muted); }
 .map-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }

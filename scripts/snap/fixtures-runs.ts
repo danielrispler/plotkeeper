@@ -48,6 +48,9 @@ export const mapRuns = (): Fixture =>
       if (rows[0].dataset.state !== "running" || !rows[0].textContent.includes("Running since")) log("snap:fail the running row: " + rows[0].textContent);
       if (!rows[1].textContent.includes("Queued, next") || !rows[2].textContent.includes("Micro-world")) log("snap:fail the queue: " + rows[1].textContent + " / " + rows[2].textContent);
       if (!rows[3].textContent.includes("1 tool call was denied") || !rows[3].textContent.includes("git push")) log("snap:fail the denied run: " + rows[3].textContent);
+      const warned = rows.map((row) => row.querySelector(".run-warning")?.textContent ?? "");
+      if (!warned[0].startsWith("The sandbox gate has not run on Claude Code 2.1.399") || warned.slice(1).some(Boolean)) log("snap:fail the ungated warning: " + warned.join(" / "));
+      if (rows[0].querySelector(".run-note")?.nextElementSibling?.className !== "run-warning") log("snap:fail the warning is not under the note");
       const words = (row) => [...row.querySelectorAll("button")].map((button) => button.textContent).join(",");
       if (words(rows[0]) !== "Cancel" || words(rows[1]) !== "Cancel" || words(rows[3]) !== "Copy prompt,Dismiss") log("snap:fail the buttons: " + rows.map(words).join(" / "));
       if (document.querySelector("#map-runs .runs-paused")) log("snap:fail a pause shows with no pause");
@@ -65,7 +68,7 @@ export const mapRuns = (): Fixture =>
       runs: {
         paused: null,
         runs: [
-          { id: "19a2f-1", kind: "back-law", state: "running", at: runAt, outcome: null, line: null, denials: [], prompt: null },
+          { id: "19a2f-1", kind: "back-law", state: "running", at: runAt, outcome: null, line: null, warning: "The sandbox gate has not run on Claude Code 2.1.399 (last passed on 2.1.326).", denials: [], prompt: null },
           { id: "19a2f-2", kind: "back-law", state: "queued", at: runAt, outcome: null, line: null, denials: [], prompt: null },
           { id: "19a2f-3", kind: "micro-world", state: "queued", at: runAt, outcome: null, line: null, denials: [], prompt: null },
           { id: "19a2f-0", kind: "back-law", state: "ended", at: runAt, outcome: "denied", line: "Finished, but 1 tool call was denied", denials: ["Bash: git push origin HEAD"], prompt: "Write a test tagged @law: core-order." },

@@ -301,7 +301,7 @@ fn law_patches() -> Vec<LawPatch> {
     ]
 }
 
-/// The background runs paused, with a run in each state, of each kind and with each end.
+/// The background runs paused, with a run in each state, of each kind and with each end, and runs that warn.
 fn runs() -> Runs {
     let run = |state, kind, outcome: Option<End>| RunView {
         id: "19a2f-4d2-0".into(),
@@ -310,6 +310,7 @@ fn runs() -> Runs {
         at: 1_761_743_990_000,
         outcome,
         line: outcome.map(|_| "Finished, but 1 tool call was denied".into()),
+        warning: None,
         denials: outcome.map_or_else(Vec::new, |_| vec!["Bash: git push".into()]),
         prompt: outcome.map(|_| "Write a test that backs the law.".into()),
     };
@@ -330,6 +331,15 @@ fn runs() -> Runs {
         run(RunState::Running, Kind::FirstMap, None),
     ];
     list.extend(ends.map(|end| run(RunState::Ended, Kind::BackLaw, Some(end))));
+    let warning = "The sandbox gate has not run on Claude Code 2.1.399 (last passed on 2.1.326).";
+    list.extend(
+        [(RunState::Queued, None), (RunState::Ended, Some(End::Done))].map(|(state, outcome)| {
+            RunView {
+                warning: Some(warning.into()),
+                ..run(state, Kind::BackLaw, outcome)
+            }
+        }),
+    );
     Runs {
         paused: Some("Claude hit its usage or rate limit".into()),
         runs: list,

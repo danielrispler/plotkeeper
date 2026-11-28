@@ -9,7 +9,8 @@
 // A subagent is a child session of its own (#718): its spawn's end names it (`spawned_session_id`), its tool calls,
 // permission asks and the end of each of its runs, with its reply, go under the session it was spawned from with its
 // own id (`subagent_session_id`), and its prompt is not recorded. A background subagent's result starts its parent's
-// next turn with no prompt, which is sent as `session.execution.started`, a wake-up.
+// next turn with no prompt, which is sent as `session.execution.started`, a wake-up, with the subagent results the turn
+// took (#779).
 
 import { spawn } from "node:child_process";
 
@@ -59,6 +60,22 @@ function recorder(ctx) {
     calls: new Map(),
     // A permission ask whose call has not started yet, by its call id.
     asks: new Map(),
+    // Each top-level session's subagent result not yet delivered, by its inbox id: the child and how it ended.
+    results: new Map(),
+    // Each top-level session's wake-up, held until its turn's first step with the results the turn took by then.
+    waking: new Map(),
+    /** Sends `line`, a top-level session's after its held wake-up, which comes before it; a subagent's goes on its
+     * own, as it is no line of its parent's turn. */
+    send(line) {
+      if (!line.subagent_session_id) this.flush(line.session_id);
+      send(line);
+    },
+    /** Sends `session`'s held wake-up. */
+    flush(session) {
+      const held = this.waking.get(session);
+      this.waking.delete(session);
+      if (held) send(held);
+    },
     // When the line was sent: each goes through a hook process of its own, all in parallel, so the lines land in any
     // order, and the hook orders a turn's lines by it (#717).
     line: (name, session, fields) => ({ hook_event_name: name, session_id: session, cwd, sent_ms: Date.now(), ...fields }),
@@ -75,7 +92,7 @@ function recordPrompts(ctx, r) {
     const top = await r.root(event.sessionID);
     if (top !== event.sessionID) return void r.prompted.delete(event.sessionID);
     r.turns.set(top, { model: r.turns.get(top)?.model, reply: "" });
-    send(r.line("session.prompt", top, { prompt_id: event.messageID, prompt: event.prompt?.text ?? "" }));
+    r.send(r.line("session.prompt", top, { prompt_id: event.messageID, prompt: event.prompt?.text ?? "" }));
   });
 }
 
@@ -94,14 +111,14 @@ function recordTools(ctx, r) {
   const tool = async (name, event, fields) => {
     const top = await r.root(event.sessionID);
     const subagent = r.subagent(top, event.sessionID);
-    send(r.line(name, top, { tool_name: event.tool, tool_use_id: event.id, tool_input: event.input ?? {}, ...subagent, ...fields }));
+    r.send(r.line(name, top, { tool_name: event.tool, tool_use_id: event.id, tool_input: event.input ?? {}, ...subagent, ...fields }));
   };
   ctx.tool.hook("execute.before", async (event) => {
     r.calls.set(event.id, { tool: event.tool, input: event.input ?? {} });
     await tool("tool.execute.before", event, {});
     const ask = r.asks.get(event.id);
     r.asks.delete(event.id);
-    if (ask) send(ask(r.calls.get(event.id)));
+    if (ask) r.send(ask(r.calls.get(event.id)));
   });
   ctx.tool.hook("execute.after", (event) => {
     r.calls.delete(event.id);
@@ -123,6 +140,7 @@ const inputTokens = (tokens) => tokens && (tokens.input ?? 0) + (tokens.cache?.r
 async function recordEvents(ctx, r, signal) {
   const steps = ["session.step.started", "session.step.ended"];
   const types = ["session.execution.started", ...steps, "session.text.ended", "permission.asked", ...TURN_ENDS];
+  types.push("session.inbox.enqueued", "session.inbox.delivered");
   for await (const event of ctx.event.subscribe({ types, signal })) {
     const data = event.data ?? {};
     if (!r.seen(data.sessionID)) continue;
@@ -132,29 +150,50 @@ async function recordEvents(ctx, r, signal) {
       const id = data.source?.type === "tool" ? data.source.id : undefined;
       const call = r.calls.get(id);
       if (id && !call) r.asks.set(id, (started) => askLine(r, top, data, started));
-      else send(askLine(r, top, data, call ?? {}));
+      else r.send(askLine(r, top, data, call ?? {}));
       continue;
     }
     const own = data.sessionID;
     const child = top !== own;
+    // A background job's result reaches its parent's inbox when it ends, and is delivered into the turn that takes
+    // it: a wake-up it starts, or one running. Only a subagent's is sent; a shell, image, video or Code Mode job's
+    // names no one (`docs/studio/research/opencode-background-results.md`).
+    if (event.type === "session.inbox.enqueued") {
+      const metadata = data.item?.payload?.metadata;
+      const result = { subagent_session_id: metadata?.childID, state: metadata?.state };
+      if (!child && metadata?.source === "subagent" && metadata.childID) r.results.set(data.inboxID, result);
+      continue;
+    }
+    if (event.type === "session.inbox.delivered") {
+      const result = r.results.get(data.inboxID);
+      r.results.delete(data.inboxID);
+      if (result && r.waking.has(top)) r.waking.get(top).reported.push(result);
+      else if (result) r.send(r.line(event.type, top, { reported: [result] }));
+      continue;
+    }
     const turn = r.turns.get(own) ?? { reply: "" };
     r.turns.set(own, turn);
     if (event.type === "session.execution.started") {
-      // A top-level turn with no prompt is a wake-up; a subagent's run is never sent.
+      // A top-level turn with no prompt is a wake-up; a subagent's run is never sent. Its results are delivered
+      // before its first step.
       const wakeUp = !child && !r.prompted.delete(top);
       if (child || wakeUp) turn.reply = "";
-      if (wakeUp) send(r.line(event.type, top, {}));
-    } else if (event.type === "session.step.started") turn.model = data.model?.id;
+      if (!child) r.flush(top);
+      if (wakeUp) r.waking.set(top, r.line(event.type, top, { reported: [] }));
+    } else if (event.type === "session.step.started") {
+      turn.model = data.model?.id;
+      if (!child) r.flush(top);
+    }
     // A subagent's steps count on its own turn, whose end sends no count: they are not the session's context. A step
     // that names no tokens, or none at all, keeps the last count.
     else if (event.type === "session.step.ended") turn.context = inputTokens(data.tokens) || turn.context;
     else if (event.type === "session.text.ended") turn.reply = data.text ?? "";
     else if (child) {
-      send(r.line(event.type, top, { last_assistant_message: turn.reply, ...r.subagent(top, own) }));
+      r.send(r.line(event.type, top, { last_assistant_message: turn.reply, ...r.subagent(top, own) }));
       r.turns.delete(own);
     } else {
       const fields = { model: turn.model ?? null, last_assistant_message: turn.reply, context_tokens: turn.context ?? null };
-      send(r.line(event.type, top, fields));
+      r.send(r.line(event.type, top, fields));
     }
   }
 }

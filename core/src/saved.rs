@@ -10,7 +10,7 @@ use std::{cell::Cell, collections::BTreeMap, fmt};
 /// The saved state's format. Bump it when a saved field changes meaning or a field the pane's JSON
 /// leaves out is added, so an older file is not read as the new shape: a field the old file lacks
 /// makes it unreadable anyway, unless it has a default.
-const FORMAT: u32 = 9;
+const FORMAT: u32 = 10;
 
 thread_local! {
     static SAVING: Cell<bool> = const { Cell::new(false) };
