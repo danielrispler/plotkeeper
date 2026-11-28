@@ -956,8 +956,8 @@ fn read_outcome(dir: &Path) -> (Outcome, Option<Status>) {
             .iter()
             .any(|said| SANDBOX_FAILURES.iter().any(|word| said.contains(word)));
         // A finished run whose tools wrote in the shared temp folder is never a success (#773).
-        let shared_tmp = status.shared_tmp && status.exit == Some(0) && !is_error;
-        let end = if sandbox_failed || shared_tmp {
+        let fell_back = status.shared_tmp && status.exit == Some(0) && !is_error;
+        let end = if sandbox_failed || fell_back {
             End::Failed
         } else if status.exit != Some(0) || is_error {
             // Only a failure's words are read for a login or a limit: a good result may talk about either.
@@ -980,7 +980,7 @@ fn read_outcome(dir: &Path) -> (Outcome, Option<Status>) {
             end,
             result: if sandbox_failed {
                 format!("{SANDBOX_DOWN}\n{result}")
-            } else if shared_tmp {
+            } else if fell_back {
                 format!("{SHARED_TMP}\n{result}")
             } else {
                 result

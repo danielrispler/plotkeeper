@@ -387,7 +387,6 @@ impl Bench {
     }
 }
 
-/// The sandbox fails closed (#548): its deny list names folders of the home folder, so with none known no proof runs.
 /// The proof's sandbox lets no check write into Claude Code's shared temp folder, where every session keeps its
 /// scratchpad (#773): `/tmp/claude-<uid>`, and on macOS its `/private/tmp` form.
 #[test]
@@ -410,6 +409,7 @@ fn the_proofs_sandbox_denies_writes_to_the_shared_temp_folder() {
     );
 }
 
+/// The sandbox fails closed (#548): its deny list names folders of the home folder, so with none known no proof runs.
 #[test]
 fn a_proof_with_no_home_folder_is_rejected_and_srt_never_starts() {
     let bench = bench_with(MAP, &format!("{TEST}{PLANT}{DONE}"), false);

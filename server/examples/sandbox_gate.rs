@@ -391,6 +391,7 @@ fn temp_probe(name: &'static str, variant: Variant, g: &Ground) -> Probe {
         setup: None,
         script: sh(&format!(
             "echo TMPDIR=$TMPDIR\n\
+             printf %s \"$TMPDIR\" > tmpdir.txt\n\
              touch '{temp}/pk-gate-temp-root-{name}'; echo temp_root=$?\n\
              touch '{temp}/{STANDIN}/scratchpad/run-{name}.sh'; echo existing_session=$?\n\
              mkdir -p '{temp}/pk-gate-new-session-{name}/scratchpad' && touch '{temp}/pk-gate-new-session-{name}/scratchpad/run-x.sh'; echo new_session=$?\n\
@@ -508,8 +509,29 @@ fn verdict(g: &Ground, name: &str, work: &Path, stdout: &str, outcome: &Outcome)
                 "a file in the tools' `TMPDIR`, when that is the shared folder",
                 g.temp.join(format!("pk-gate-tmpdir-{name}")),
             );
+            // The tools' `TMPDIR`, as the probe wrote it into its clone, against the folder this probe expects: the
+            // run's own `<private>/claude-<uid>`, or with the long name the shared one. So the launcher's check below
+            // is measured against what the tools really got, not against a folder the CLI may make for itself.
+            let tmpdir = fs::read_to_string(work.join("tmpdir.txt")).unwrap_or_default();
+            // `/tmp` is `/private/tmp` on macOS, and either form may show.
+            let tmpdir = tmpdir.trim_end_matches('/');
+            let tmpdir = Path::new(tmpdir.strip_prefix("/private").unwrap_or(tmpdir));
+            let fallback = name == "temp-fallback";
+            let uid_name = g.temp.file_name().unwrap_or_default();
+            let expected = if fallback {
+                tmpdir == Path::new("/tmp").join(uid_name)
+            } else {
+                tmpdir == studio_server::runner::private_tmp(work).join(uid_name)
+            };
+            lines.push(format!(
+                "{} the tools' `TMPDIR` was{} the {} folder: `{}`",
+                if expected { "pass" } else { "FAIL" },
+                if expected { "" } else { " not" },
+                if fallback { "shared" } else { "run's own" },
+                tmpdir.display()
+            ));
             let shared = outcome.result.starts_with(SHARED_TMP);
-            let (pass, said) = if name == "temp-fallback" {
+            let (pass, said) = if fallback {
                 (
                     outcome.end == End::Failed && shared,
                     format!(
@@ -521,7 +543,7 @@ fn verdict(g: &Ground, name: &str, work: &Path, stdout: &str, outcome: &Outcome)
                 (
                     !shared,
                     format!(
-                        "the run's own temp folder held the tools' folder: {}",
+                        "the launcher found the tools' folder in the run's own: {}",
                         !shared
                     ),
                 )
