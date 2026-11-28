@@ -24,8 +24,7 @@ use std::{
     time::Duration,
 };
 use studio_server::runner::{
-    Claude, Config, End, Harness, HarnessCommand, Kind, Limits, Outcome, Plan, Request, Runner,
-    SHARED_TMP, shared_tmp,
+    Claude, Config, Harness, HarnessCommand, Kind, Limits, Plan, Request, Runner, shared_tmp,
 };
 
 /// How a probe's command differs from the runner's own.
@@ -97,7 +96,6 @@ impl Harness for Gate {
                     "CLAUDE_CODE_TMPDIR".into(),
                     long.to_string_lossy().into_owned(),
                 );
-                command.tools_tmp = Some(tools);
                 command.private_tmp = Some(long);
             }
         }
@@ -380,10 +378,10 @@ fn temp_probe(name: &'static str, variant: Variant, g: &Ground) -> Probe {
         name,
         criterion: if variant == Variant::LongTmp {
             "(#773) With the private folder past the 44-byte limit, the sandbox falls back to the shared temp folder: \
-             `denyWrite` still refuses every write there, its `TMPDIR` included, and the run ends failed."
+             `denyWrite` still refuses every write there, its `TMPDIR` included."
         } else {
-            "A write into Claude Code's per-user temp folder is refused, and Claude Code makes the tools' folder in the \
-             run's own."
+            "A write into Claude Code's per-user temp folder is refused, and the tools' `TMPDIR` is the run's own \
+             folder."
         },
         kind: Kind::BackLaw,
         variant,
@@ -450,12 +448,12 @@ fn clone_repo(g: &Ground, work: &Path) -> Result<(), String> {
         .ok_or("git clone failed".into())
 }
 
-/// The paths each probe must leave absent, or present, read after its run, and how the run ended.
+/// The paths each probe must leave absent, or present, read after its run.
 #[allow(
     clippy::too_many_lines,
     reason = "a hand-run trial's whole script, read top to bottom"
 )]
-fn verdict(g: &Ground, name: &str, work: &Path, stdout: &str, outcome: &Outcome) -> String {
+fn verdict(g: &Ground, name: &str, work: &Path, stdout: &str) -> String {
     let exists = |p: &Path| p.exists();
     let mut lines = Vec::new();
     let mut must_be_absent = |label: &str, p: PathBuf| {
@@ -510,8 +508,8 @@ fn verdict(g: &Ground, name: &str, work: &Path, stdout: &str, outcome: &Outcome)
                 g.temp.join(format!("pk-gate-tmpdir-{name}")),
             );
             // The tools' `TMPDIR`, as the probe wrote it into its clone, against the folder this probe expects: the
-            // run's own `<private>/claude-<uid>`, or with the long name the shared one. So the launcher's check below
-            // is measured against what the tools really got, not against a folder the CLI may make for itself.
+            // run's own `<private>/claude-<uid>`, or with the long name the shared one, so a fallback is measured and
+            // not assumed. Claude Code makes `<private>/claude-<uid>` for its own files either way (#773).
             let tmpdir = fs::read_to_string(work.join("tmpdir.txt")).unwrap_or_default();
             // `/tmp` is `/private/tmp` on macOS, and either form may show.
             let tmpdir = tmpdir.trim_end_matches('/');
@@ -530,25 +528,6 @@ fn verdict(g: &Ground, name: &str, work: &Path, stdout: &str, outcome: &Outcome)
                 if fallback { "shared" } else { "run's own" },
                 tmpdir.display()
             ));
-            let shared = outcome.result.starts_with(SHARED_TMP);
-            let (pass, said) = if fallback {
-                (
-                    outcome.end == End::Failed && shared,
-                    format!(
-                        "the run ended {:?}, the shared temp folder named: {shared}",
-                        outcome.end
-                    ),
-                )
-            } else {
-                (
-                    !shared,
-                    format!(
-                        "the launcher found the tools' folder in the run's own: {}",
-                        !shared
-                    ),
-                )
-            };
-            lines.push(format!("{} {said}", if pass { "pass" } else { "FAIL" }));
         }
         "restricted" => {
             let leaked = stdout.contains(MARKER);
@@ -593,11 +572,6 @@ fn verdict(g: &Ground, name: &str, work: &Path, stdout: &str, outcome: &Outcome)
         }
         _ => {}
     }
-    // Whether Claude Code made the tools' folder in the run's own temp folder, for every probe (#773).
-    lines.push(format!(
-        "info the launcher found the tools' temp folder was the shared one: {}",
-        outcome.result.starts_with(SHARED_TMP)
-    ));
     lines.join("\n")
 }
 
@@ -751,7 +725,7 @@ fn main() -> Result<(), String> {
             }
         }
         let stdout = fs::read_to_string(dir.join("stdout")).unwrap_or_default();
-        let verdict = verdict(&g, p.name, work, &stdout, &outcome);
+        let verdict = verdict(&g, p.name, work, &stdout);
         let text = format!("{}\n\n{outcome:#?}\n\n{verdict}\n", p.criterion);
         fs::write(into.join("verdict.txt"), &text).map_err(|e| e.to_string())?;
         // Writing to a `String` cannot fail.

@@ -20,7 +20,7 @@ claude --restricted --safe-mode --strict-mcp-config --permission-mode dontAsk --
   --settings <the sandbox block> --output-format json -p <the prompt>
 ```
 
-Standard input is closed, so the prompt is the last argument. `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are removed, so the run uses the CLI's own login, and `PLOTKEEPER_INTERNAL=1` keeps the hook from recording it, as for the writer. `CLAUDE_CODE_TMPDIR` names the run's private temp folder, `/tmp/pk-<16 hex>`: the sandbox then gives the tools `/tmp/pk-<16 hex>/claude-<uid>` as `TMPDIR`. Without it the tools' `TMPDIR` is the shared `/tmp/claude-<uid>`, where every session keeps its scratchpad, and the sandbox lets them write there. Claude Code uses the folder only while `<it>/claude-<uid>` is at most 44 bytes, so the name is of fixed length, 42 bytes with the longest uid. Past that limit it falls back to the shared folder without a word, so a run fails closed on a fallback (#773): the sandbox block denies writes to the shared folder, and a run of a kind with a shell that finished, cleanly or with denials, while its private folder holds no `claude-<uid>` ends failed, "The sandbox gave the tools the shared temp folder, /tmp/claude-<uid>, not the run's own". The launcher looks for that folder when the harness exits, before it removes the private one. `--restricted` drops the user's, the project's and the local settings files; `--safe-mode` drops hooks, plugins, skills and `CLAUDE.md`.
+Standard input is closed, so the prompt is the last argument. `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are removed, so the run uses the CLI's own login, and `PLOTKEEPER_INTERNAL=1` keeps the hook from recording it, as for the writer. `CLAUDE_CODE_TMPDIR` names the run's private temp folder, `/tmp/pk-<16 hex>`: the sandbox then gives the tools `/tmp/pk-<16 hex>/claude-<uid>` as `TMPDIR`. Without it the tools' `TMPDIR` is the shared `/tmp/claude-<uid>`, where every session keeps its scratchpad, and the sandbox lets them write there. Claude Code uses the folder only while `<it>/claude-<uid>` is at most 44 bytes, so the name is of fixed length, 42 bytes with the longest uid. Past that limit it falls back to the shared folder without a word, so the sandbox block denies writes to the shared folder (#773): on a fallback the tools' writes there are refused. Nothing yet ends such a run failed (#788). `--restricted` drops the user's, the project's and the local settings files; `--safe-mode` drops hooks, plugins, skills and `CLAUDE.md`.
 
 The sandbox block is this, with plotkeeper's data folder first in `denyRead`, since it holds the page's token:
 
@@ -128,13 +128,13 @@ The read-only check of the map text a PR changed, and of the unchanged text of t
 
 ## The sandbox gate
 
-The tests never start `claude`: they prove the lifecycle with a fake harness and read the built command. The sandbox gate (#395) runs each run through `Runner::submit` with a real `claude` and with `srt`, by hand and outside auto mode: `server/examples/sandbox_gate.rs`, whose header says how. Each verdict is read from the disk after the run (a file that must not exist, a marker that must not show), never from what the agent says, and a probe makes its escapes from an allowed check, `sh ./probe.sh`, so the OS sandbox and not the permission layer is what refuses them. Its last run, on Claude Code 2.1.325 with Sonnet, passed every check:
+The tests never start `claude`: they prove the lifecycle with a fake harness and read the built command. The sandbox gate (#395) runs each run through `Runner::submit` with a real `claude` and with `srt`, by hand and outside auto mode: `server/examples/sandbox_gate.rs`, whose header says how. Each verdict is read from the disk after the run (a file that must not exist, a marker that must not show), never from what the agent says, and a probe makes its escapes from an allowed check, `sh ./probe.sh`, so the OS sandbox and not the permission layer is what refuses them. Its last run, on Claude Code 2.1.326 with Sonnet (#773), passed every check:
 
 | Check | Result |
 |---|---|
 | A write outside the clone | Refused: the home folder, `/private/tmp`, the run's own folder, a folder beside the runs. |
 | A write into Claude Code's per-user temp folder | Refused: its root, an existing session's scratchpad, a new folder. The tools' `TMPDIR` is the run's private folder. |
-| The private folder past the 44-byte limit (`temp-fallback`, #773) | The tools' `TMPDIR` falls back to the shared folder; `denyWrite` refuses every write there, a file in that `TMPDIR` included, and the run ends failed with the shared folder named. |
+| The private folder past the 44-byte limit (`temp-fallback`, #773) | The tools' `TMPDIR` falls back to `/tmp/claude-<uid>`; `denyWrite` refuses every write there, a file in that `TMPDIR` included. The run still ends `Done` (#788). |
 | A network call from a tool | Refused: `curl` gets a 403 from the proxy, also for `api.anthropic.com`, and raw TCP fails. The CLI itself reaches the API. |
 | A read of each `denyRead` folder | Refused, for every folder and file of the block; a file outside it still reads. The CLI's login works with `~/.claude` and `~/.claude.json` denied. |
 | `--restricted` and Read, Glob and Grep outside the clone | Denied, each listed in the result's denials. |
@@ -147,11 +147,11 @@ The tests never start `claude`: they prove the lifecycle with a fake harness and
 
 What the gate found on the way, and changed here:
 
-- **The temp folder.** The tools' `TMPDIR` was the shared `/tmp/claude-<uid>`. A `denyWrite` on it breaks every build, since it is their `TMPDIR`; a long `CLAUDE_CODE_TMPDIR` moves only the CLI's own files. A short one, under the 44-byte limit, moves the tools' `TMPDIR` too. With it, the `denyWrite` costs nothing, and #773 added it to fail closed on a fallback.
+- **The temp folder.** The tools' `TMPDIR` was the shared `/tmp/claude-<uid>`. A `denyWrite` on it breaks every build, since it is their `TMPDIR`; a long `CLAUDE_CODE_TMPDIR` moves only the CLI's own files. A short one, under the 44-byte limit, moves the tools' `TMPDIR` too. With it, the `denyWrite` costs nothing: #773 added it, and the offline build still passes. Claude Code makes `<CLAUDE_CODE_TMPDIR>/claude-<uid>` for its own files even on a fallback, so that folder being there says nothing about the tools' `TMPDIR`; #773's check for it was dropped, and detection is #788.
 - **Loopback.** With it closed, plotkeeper's own tests fail in every run; `allowLocalBinding` is on for runs and for the `srt` proof step.
 - **`failIfUnavailable` does not stop such a run.** Inside another sandbox Claude Code starts, every command fails with `sandbox_apply: Operation not permitted`, and the run exits 0 as a success. Hence the launcher's check, and the reading of those words as a failure. An `(allow default)` profile still applies inside another sandbox, so the check's profile denies something.
 
-The raw output of each round is in `local-evidence/2026-11-24-issue-395-sandbox-gate/` on Daniel's machine. Rerun the gate after a Claude Code update: its behaviour here changed between the versions tried.
+The raw output of each round is in `local-evidence/2026-11-24-issue-395-sandbox-gate/` on Daniel's machine, and of #773's run in `local-evidence/2026-11-28-issue-773-sandbox-gate/`. Rerun the gate after a Claude Code update: its behaviour here changed between the versions tried.
 
 ### On Linux
 
@@ -201,5 +201,5 @@ v1 is one user on his own Mac, runs start only on his click (but the map text re
 
 - A run's tools can connect to any server on the Mac's loopback. plotkeeper's own server needs its cookie or token, which a run cannot read.
 - Only the shell is sandboxed, not the whole `claude` process, which Anthropic's docs ask of fully unattended runs.
-- The private temp folder holds only while `<it>/claude-<uid>` is at most 44 bytes; past that, Claude Code falls back to the shared folder without a word. The name is of fixed length, 42 bytes with the longest uid. Since #773 a fallback fails closed ([The command](#the-command)): writes to the shared folder are refused and the run ends failed. A run of a kind with no shell is not checked, since it has no sandboxed tools.
+- The private temp folder holds only while `<it>/claude-<uid>` is at most 44 bytes; past that, Claude Code falls back to the shared folder without a word. The name is of fixed length, 42 bytes with the longest uid. Since #773 the tools' writes to the shared folder are refused on a fallback ([The command](#the-command)), but the run still finishes as if nothing happened: detecting it is #788.
 - Tools may read the home folder outside the deny list.
