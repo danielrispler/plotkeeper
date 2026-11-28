@@ -423,3 +423,138 @@ fn an_opencode_sessions_context_size_is_its_last_top_level_steps_input_tokens() 
     assert_eq!(session.agents.len(), 1);
     assert_eq!(session.state, State::YourTurn);
 }
+
+/// A line of `HELLO`'s, sent and received at `at`.
+fn hello(name: &str, at: u64, fields: Value) -> String {
+    let mut line = json!({
+        "session_id": HELLO, "cwd": "/Users/me/work/hello", "hook_event_name": name, "sent_ms": at,
+        "studio_agent": "opencode", "studio_received_ms": at,
+    });
+    line.as_object_mut()
+        .unwrap()
+        .extend(fields.as_object().unwrap().clone());
+    line.to_string()
+}
+
+/// The `reported` of a line of the plugin since #779: each child with OpenCode's `state`.
+fn reported(pairs: &[(&str, &str)]) -> Value {
+    let each = pairs
+        .iter()
+        .map(|(child, state)| json!({ "subagent_session_id": child, "state": state }));
+    json!({ "reported": Value::Array(each.collect()) })
+}
+
+/// The end of `HELLO`'s turn, or of subagent `child`'s run, at `at`.
+fn run_end(at: u64, child: Option<&str>) -> String {
+    let mut fields = json!({ "last_assistant_message": "Done." });
+    if let Some(child) = child {
+        fields["subagent_session_id"] = child.into();
+    }
+    hello("session.execution.succeeded", at, fields)
+}
+
+/// A turn of `HELLO`'s that spawns two background subagents, A (`ses_aaaaa`) and B (`ses_bbbbb`),
+/// each of which then reads a file, A last.
+fn two_children() -> Vec<String> {
+    let spawn = |at: u64, call: &str, child: &str, description: &str| {
+        let input = json!({ "description": description, "prompt": "Go.", "agent": "general" });
+        let call = json!({ "tool_name": "subagent", "tool_use_id": call, "tool_input": input });
+        let mut ended = call.clone();
+        ended["status"] = "completed".into();
+        ended["spawned_session_id"] = child.into();
+        [
+            hello("tool.execute.before", at, call),
+            hello("tool.execute.after", at + 5, ended),
+        ]
+    };
+    let read = |at: u64, child: &str| {
+        let fields = json!({ "tool_name": "read", "tool_use_id": format!("read-{child}"), "tool_input": { "path": "f" }, "subagent_session_id": child });
+        hello("tool.execute.before", at, fields)
+    };
+    let prompt = json!({ "prompt_id": "msg_0", "prompt": "Spawn two." });
+    let mut lines = vec![hello("session.prompt", 100, prompt)];
+    lines.extend(spawn(110, "call_a", "ses_aaaaa", "A"));
+    lines.extend(spawn(130, "call_b", "ses_bbbbb", "B"));
+    lines.extend([
+        run_end(150, None),
+        read(200, "ses_bbbbb"),
+        read(300, "ses_aaaaa"),
+    ]);
+    lines
+}
+
+/// What a wake-up's turn took (#779): the plugin sends with a wake-up the subagent results its turn
+/// took before its first step (`reported`, each child with OpenCode's `state`), and a result
+/// delivered into a running turn on a line of its own (`session.inbox.delivered`). Two children,
+/// A and B, run in the background; A has the latest event, and both children's end lines land
+/// after the wake-up. A turn names, in delivery order, every child whose result it took, and each
+/// such child ends with its result's status, whatever its status-less end says.
+#[test]
+fn a_wake_up_names_the_subagents_whose_results_its_turn_took_and_each_ends_with_its_status() {
+    let (a, b) = ("ses_aaaaa", "ses_bbbbb");
+    let wake = |pairs: Option<&[(&str, &str)]>| {
+        let fields = pairs.map_or(json!({}), reported);
+        hello("session.execution.started", 900, fields)
+    };
+    let prompt = hello(
+        "session.prompt",
+        900,
+        json!({ "prompt_id": "msg_1", "prompt": "And now?" }),
+    );
+    let delivered = |pairs: &[(&str, &str)]| hello("session.inbox.delivered", 950, reported(pairs));
+    let late_wake = |pairs: &[(&str, &str)]| {
+        let mut fields = reported(pairs);
+        fields["studio_late"] = true.into();
+        hello("session.execution.started", 850, fields)
+    };
+    let completed = Status::Completed;
+    let failed = Status::Ended("failed".into());
+    let interrupted = Status::Ended("interrupted".into());
+    // Each case: the lines after the two children's, its turn's label and whether it is a
+    // wake-up's, and how A and B end.
+    #[rustfmt::skip]
+    let cases = [
+        ("B's result alone names B, though A has the latest event",
+            vec![wake(Some(&[(b, "completed")]))], "worker B returned", true, [completed.clone(), completed.clone()]),
+        ("two results name both, each child ending with its own status",
+            vec![wake(Some(&[(a, "error"), (b, "cancelled")]))], "workers A and B returned", true, [failed.clone(), interrupted.clone()]),
+        ("a result that joins the running wake-up names its child after the first",
+            vec![wake(Some(&[(b, "completed")])), delivered(&[(a, "error")])], "workers B and A returned", true, [failed.clone(), completed.clone()]),
+        ("a wake-up whose turn took no subagent's result, as a shell job's, names none",
+            vec![wake(Some(&[]))], "background job returned", true, [completed.clone(), completed.clone()]),
+        ("a log from before #779 names the child with the latest event, and its children end completed",
+            vec![wake(None)], "worker A returned", true, [completed.clone(), completed.clone()]),
+        ("a result delivered into a turn Daniel prompted ends its child and leaves his prompt",
+            vec![prompt, delivered(&[(a, "cancelled")])], "And now?", false, [interrupted.clone(), completed.clone()]),
+        ("a result after its child's end, OpenCode's own order, still ends it with its status",
+            vec![run_end(800, Some(b)), wake(Some(&[(b, "error")]))], "worker B returned", true, [completed.clone(), failed.clone()]),
+        ("a wake-up the hook took late ends its child but leaves the running wake-up's name",
+            vec![wake(Some(&[(b, "completed")])), late_wake(&[(a, "error")])], "worker B returned", true, [failed.clone(), completed.clone()]),
+    ];
+    for (case, after, label, wake_up, statuses) in cases {
+        let mut lines = two_children();
+        lines.extend(after);
+        lines.extend([
+            run_end(1000, Some(b)),
+            run_end(1010, Some(a)),
+            run_end(1100, None),
+        ]);
+        let studio = Studio::replayed(&lines);
+        let session = studio.session(HELLO).unwrap();
+
+        let turn = &session.turns[1];
+        assert_eq!(
+            (turn.prompt.as_str(), turn.wake_up),
+            (label, wake_up),
+            "{case}"
+        );
+        let status = |id: &str| {
+            let agent = session.agents.iter().find(|s| s.agent.id == id).unwrap();
+            agent.status.clone()
+        };
+        assert_eq!([status(a), status(b)], statuses, "{case}");
+        assert_eq!(session.turns.len(), 2, "{case}");
+        let row = wake_up.then(|| label.to_owned());
+        assert_eq!(session.returned, row, "{case}: the row's name");
+    }
+}

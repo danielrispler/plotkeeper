@@ -9,10 +9,12 @@
 //! `tool.execute.after`, with the tool's name, call id and input, and at the end its `status`,
 //! error and a shell's `exit`), and from its event stream `permission.asked` and a turn's end
 //! (`session.execution.succeeded`, `.failed` or `.interrupted`; `.started` only for a turn that
-//! starts with no prompt, as when a background subagent's result wakes its parent), which carries
-//! the model the turn's steps named, the turn's last text and, on a top-level turn's, its latest
-//! step's input tokens (`context_tokens`: `session.step.ended`'s `input + cache.read +
-//! cache.write`, #719). OpenCode reports no session start or end. A subagent is a
+//! starts with no prompt, as when a background subagent's result wakes its parent, with the subagent
+//! results its turn took, `reported`), which carries the model the turn's steps named, the turn's
+//! last text and, on a top-level turn's, its latest step's input tokens (`context_tokens`:
+//! `session.step.ended`'s `input + cache.read + cache.write`, #719); a subagent's result delivered
+//! into a running turn comes as `session.inbox.delivered` (#779). OpenCode reports no session start
+//! or end. A subagent is a
 //! child session that always runs in the background (#718): its `subagent` call's end names it
 //! (`spawned_session_id`), and the plugin puts its calls, asks and the end of each of its runs
 //! under the session that spawned it, with its own id (`subagent_session_id`). The tool names
@@ -86,6 +88,10 @@ struct Raw {
     subagent_session_id: Option<String>,
     /// The child session a `subagent` call started, on its end.
     spawned_session_id: Option<String>,
+    /// The subagent results a turn took (#779): on a wake-up, those it took before its first step,
+    /// empty when none was a subagent's, as a shell job's; on `session.inbox.delivered`, one that
+    /// joined a running turn. A log from the plugin before #779 has none.
+    reported: Option<Vec<Reported>>,
     /// When the plugin sent the line (#717); a log from the plugin before it has none.
     sent_ms: Option<u64>,
     #[serde(default)]
@@ -102,9 +108,44 @@ struct Raw {
     studio_touched_roots: Option<Vec<String>>,
 }
 
+/// A subagent's result, from OpenCode's `session.inbox.enqueued` item (`metadata.childID` and
+/// `metadata.state`).
+#[derive(Deserialize)]
+struct Reported {
+    subagent_session_id: String,
+    /// `completed`, `error` or `cancelled`
+    /// (`docs/studio/research/opencode-background-results.md`, section 1).
+    state: String,
+}
+
+impl Reported {
+    /// The child and the status it ends with, in the studio's words: an `error` failed, and
+    /// `cancelled` is `interrupted`, as a Claude subagent's are.
+    fn task(&self) -> (String, String) {
+        let status = match self.state.as_str() {
+            "error" => "failed",
+            "cancelled" => "interrupted",
+            other => other,
+        };
+        (self.subagent_session_id.clone(), status.into())
+    }
+}
+
+/// The tasks a line reports on, each with how it ended.
+fn reported(results: Option<&[Reported]>) -> Option<Happened> {
+    let tasks = results?.iter().map(Reported::task);
+    Some(Happened::TasksReported(tasks.collect()))
+}
+
 /// The event of OpenCode plugin line `line`; an error when it has no such line's shape.
 pub(crate) fn parse(line: &str) -> Result<Event, serde_json::Error> {
-    serde_json::from_str::<Raw>(line).map(adapt)
+    let raw = serde_json::from_str::<Raw>(line)?;
+    let tasks = reported(raw.reported.as_deref());
+    let mut event = adapt(raw);
+    // The subagent results a wake-up took, or one a running turn took on a line of its own,
+    // `session.inbox.delivered` (#779).
+    event.happened.extend(tasks);
+    Ok(event)
 }
 
 /// What a call of tool `name` is.
