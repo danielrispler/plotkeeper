@@ -37,10 +37,8 @@ pub(super) fn includes(text: &str) -> Vec<Include> {
                     .map_or(spliced.len(), |n| i + n);
             }
             b'/' if spliced.get(i + 1) == Some(&b'*') => {
-                let end = find(&spliced, i + 2, b"*/").map_or(spliced.len(), |n| n + 2);
-                // A comment that spans a line break leaves the next code at a line's start.
-                at_line_start |= spliced[i..end].contains(&b'\n');
-                i = end;
+                // A comment is one space, so it leaves the next code at a line's start only if it began at one.
+                i = find(&spliced, i + 2, b"*/").map_or(spliced.len(), |n| n + 2);
             }
             b'#' if at_line_start => {
                 if let Some((path, quoted, end)) = directive(&spliced, i + 1) {
@@ -65,6 +63,10 @@ pub(super) fn includes(text: &str) -> Vec<Include> {
                     Some(delimiter) => skip_raw_string(&spliced, i, delimiter),
                     None => skip_quoted(&spliced, i, b'"'),
                 };
+            }
+            b'0'..=b'9' if i == 0 || !is_identifier(spliced[i - 1]) => {
+                at_line_start = false;
+                i = skip_number(&spliced, i);
             }
             b'\'' => {
                 at_line_start = false;
@@ -123,10 +125,7 @@ fn directive(text: &[u8], mut i: usize) -> Option<(String, bool, usize)> {
     i = blanks(i);
     text.get(i..)?.strip_prefix(b"include")?;
     i += "include".len();
-    if text
-        .get(i)
-        .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
-    {
+    if text.get(i).is_some_and(|&b| is_identifier(b)) {
         return None;
     }
     i = blanks(i);
@@ -151,7 +150,7 @@ fn directive(text: &[u8], mut i: usize) -> Option<(String, bool, usize)> {
 fn raw_string_open(text: &[u8], i: usize) -> Option<&[u8]> {
     let start = text[..i]
         .iter()
-        .rposition(|b| !b.is_ascii_alphanumeric() && *b != b'_')
+        .rposition(|&b| !is_identifier(b))
         .map_or(0, |n| n + 1);
     if !matches!(&text[start..i], b"R" | b"LR" | b"uR" | b"UR" | b"u8R") {
         return None;
@@ -172,6 +171,26 @@ fn skip_raw_string(text: &[u8], i: usize, delimiter: &[u8]) -> usize {
     closing.extend_from_slice(delimiter);
     closing.push(b'"');
     find(text, i + 1 + delimiter.len(), &closing).map_or(text.len(), |n| n + closing.len())
+}
+
+fn is_identifier(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// The offset past the number that begins with the digit at `i`: a preprocessing number, whose `'` before a digit or
+/// letter is a digit separator (`1'000`, `0xFF'FF`), not a character literal.
+fn skip_number(text: &[u8], i: usize) -> usize {
+    let mut at = i + 1;
+    while let Some(&b) = text.get(at) {
+        let next = text.get(at + 1).copied();
+        at += match b {
+            b'e' | b'E' | b'p' | b'P' if matches!(next, Some(b'+' | b'-')) => 2,
+            b'\'' if next.is_some_and(is_identifier) => 2,
+            _ if is_identifier(b) || b == b'.' => 1,
+            _ => break,
+        };
+    }
+    at
 }
 
 /// The offset past the string or character literal opened at `i` by `quote`: at its closing quote, or at the line's end

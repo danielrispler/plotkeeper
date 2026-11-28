@@ -3,7 +3,9 @@
 
 use serde_json::{Value, json};
 
-use crate::common::{extractor_map, pairs, repo, report, run, sites, write};
+use crate::common::{
+    assert_only_candidate_links_relaxed, extractor_map, pairs, repo, report, run, sites, write,
+};
 
 /// A map naming `c-includes` that gives every tracked file but `ignored` ones its own part, so that a file pair is a
 /// pair of parts and shows in the pairs, and with no link.
@@ -27,11 +29,6 @@ fn per_file(files: &[(&str, &str)], ignored: &[&str]) -> Value {
 fn c_pairs(files: &[(&str, &str)], ignored: &[&str]) -> Vec<String> {
     let (_dir, root) = repo(&per_file(files, ignored), files);
     pairs(&report(&root))
-}
-
-/// The pairs of `src/a.c` holding `text`, with `src/x.h` and `top.h` tracked beside it.
-fn pairs_of(text: &str) -> Vec<String> {
-    c_pairs(&[("src/a.c", text), ("src/x.h", ""), ("top.h", "")], &[])
 }
 
 const A_TO_X: &str = "src/a.c>src/x.h";
@@ -81,8 +78,22 @@ fn a_quoted_include_pairs_with_a_file_next_to_the_including_file() {
         ("#include \"../x.h\"\n", vec![]),
         ("#include <../x.h>\n", vec![]),
         ("#include \"sub/../../x.h\"\n", vec![]),
+        // An empty, absolute or backslashed path.
+        ("#include \"\"\n", vec![]),
+        ("#include \"/src/x.h\"\n", vec![]),
+        ("#include \"sub\\\\..\\\\x.h\"\n", vec![]),
+        ("#include \"\\\\x.h\"\n", vec![]),
+        ("#include \".\"\n", vec![]),
+        ("#include <>\n", vec![]),
     ] {
-        assert_eq!(pairs_of(text), expected, "{text}");
+        let files = [("src/a.c", text), ("src/x.h", ""), ("top.h", "")];
+        let (_dir, root) = repo(&per_file(&files, &[]), &files);
+        let found = report(&root);
+        assert_eq!(pairs(&found), expected, "{text}");
+        // An include that pairs with nothing is no problem either.
+        if expected.is_empty() {
+            assert_eq!(found.problems, Vec::<String>::new(), "{text}");
+        }
     }
 }
 
@@ -96,23 +107,40 @@ fn the_pair_carries_the_line_of_the_directive() {
 }
 
 #[test]
-fn an_adjacent_file_the_map_ignores_or_the_reader_skips_gives_no_pair_and_stops_the_search() {
+fn an_ignored_or_skipped_file_gives_no_pair_and_an_adjacent_one_stops_the_search() {
     let text = "#include \"x.h\"\n";
-    for (files, ignored) in [
-        // An ignored sibling.
+    // The files, the ignored folders, and whether `src/a.c` is Unsure.
+    for (files, ignored, unsure) in [
+        // An ignored copy elsewhere, which keeps the include Unsure.
         (
             vec![("src/a.c", text), ("src/gen/x.h", ""), ("x.h", "")],
             vec!["src/gen/"],
+            true,
+        ),
+        // An ignored sibling stops the search before a live copy elsewhere.
+        (
+            vec![("src/a.c", text), ("src/x.h", ""), ("lib/x.h", "")],
+            vec!["src/x.h"],
+            false,
         ),
         // A skipped sibling: `test_x.h` is named like a test file.
         (
             vec![("src/a.c", "#include \"test_x.h\"\n"), ("src/test_x.h", "")],
             vec![],
+            false,
+        ),
+        // An including file the map ignores.
+        (
+            vec![("gen/a.c", text), ("gen/x.h", ""), ("b.c", "")],
+            vec!["gen/"],
+            false,
         ),
     ] {
         let ignored: Vec<&str> = ignored;
-        let found = c_pairs(&files, &ignored);
-        assert_eq!(found, Vec::<String>::new(), "{files:?}");
+        let (_dir, root) = repo(&per_file(&files, &ignored), &files);
+        let found = report(&root);
+        assert_eq!(pairs(&found), Vec::<String>::new(), "{files:?}");
+        assert_eq!(!found.unsure.is_empty(), unsure, "{files:?}");
     }
     // The ignored sibling itself.
     let found = c_pairs(
@@ -130,7 +158,7 @@ fn an_adjacent_file_the_map_ignores_or_the_reader_skips_gives_no_pair_and_stops_
 #[test]
 fn the_lexer_reads_what_the_preprocessor_reads() {
     // The lines of `src/a.c` that pair with `src/x.h`, for the text of `src/a.c`.
-    let cases: [(&str, &str, &[u32]); 24] = [
+    let cases: [(&str, &str, &[u32]); 33] = [
         ("a line comment", "// #include \"x.h\"\n", &[]),
         ("a block comment", "/* \n#include \"x.h\"\n*/\n", &[]),
         (
@@ -187,6 +215,53 @@ fn the_lexer_reads_what_the_preprocessor_reads() {
             &[1],
         ),
         ("a closing quote missing", "#include \"x.h\n", &[]),
+        (
+            "a comment spanning lines after code",
+            "int a; /* c\n c */ #include \"x.h\"\n",
+            &[],
+        ),
+        // A `'` inside a number is a digit separator, not a character literal.
+        (
+            "a digit separator",
+            "int a = 1'000; /* c\n#include \"x.h\"\n*/\n",
+            &[],
+        ),
+        (
+            "a digit separator before a raw string",
+            "int a = 1'0 + R\"(\n#include \"x.h\"\n)\";\n",
+            &[],
+        ),
+        (
+            "a hex digit separator",
+            "int a = 0xFF'FF; /* c\n#include \"x.h\"\n*/\n",
+            &[],
+        ),
+        (
+            "a binary digit separator",
+            "int a = 0b1'0; /* c\n#include \"x.h\"\n*/\n",
+            &[],
+        ),
+        // A prefixed character literal still opens one, so the `/*` inside it opens no comment.
+        (
+            "a u8 char literal",
+            "char c = u8'/*';\n#include \"x.h\"\n",
+            &[2],
+        ),
+        (
+            "an L char literal",
+            "char c = L'/*';\n#include \"x.h\"\n",
+            &[2],
+        ),
+        (
+            "a u char literal",
+            "char c = u'/*';\n#include \"x.h\"\n",
+            &[2],
+        ),
+        (
+            "a U char literal",
+            "char c = U'/*';\n#include \"x.h\"\n",
+            &[2],
+        ),
     ];
     for (name, text, lines) in cases {
         let (_dir, root) = repo(
@@ -202,33 +277,6 @@ fn the_lexer_reads_what_the_preprocessor_reads() {
 }
 
 #[test]
-fn an_empty_absolute_or_backslashed_path_gives_nothing() {
-    for text in [
-        "#include \"\"\n",
-        "#include \"/src/x.h\"\n",
-        "#include \"sub\\\\..\\\\x.h\"\n",
-        "#include \"\\\\x.h\"\n",
-        "#include \".\"\n",
-        "#include <>\n",
-    ] {
-        assert_eq!(pairs_of(text), Vec::<String>::new(), "{text}");
-    }
-}
-
-#[test]
-fn includes_inside_an_ignored_file_give_nothing() {
-    let found = c_pairs(
-        &[
-            ("gen/a.c", "#include \"x.h\"\n"),
-            ("gen/x.h", ""),
-            ("b.c", ""),
-        ],
-        &["gen/"],
-    );
-    assert_eq!(found, Vec::<String>::new());
-}
-
-#[test]
 fn a_test_file_makes_no_pair_and_does_not_make_its_part_read() {
     let skipped = [
         "tests/a.c",
@@ -241,6 +289,8 @@ fn a_test_file_makes_no_pair_and_does_not_make_its_part_read() {
         "src/test_a.c",
     ];
     let read = ["src/testutil.cc", "bench/a.cc", "src/attest.c", "src/a.c"];
+    // Each file includes its sibling `sib.h`, and its part `t` links to `lib`, which it does not include.
+    let text = "#include \"sib.h\"\n";
     for (file, is_read) in skipped
         .iter()
         .map(|f| (f, false))
@@ -248,10 +298,8 @@ fn a_test_file_makes_no_pair_and_does_not_make_its_part_read() {
     {
         let to = "lib/x.h";
         let from_dir = file.rsplit_once('/').unwrap().0;
-        // A skipped file includes a sibling and `lib/x.h` through its own folder's copy.
-        let text = format!("#include \"{}\"\n", "sib.h");
         let files = [
-            (*file, text.as_str()),
+            (*file, text),
             (&format!("{from_dir}/sib.h")[..], ""),
             (to, ""),
         ];
@@ -358,33 +406,6 @@ fn owned(files: &[(String, String)]) -> Vec<(&str, &str)> {
 }
 
 #[test]
-fn a_sibling_wins_over_a_root_relative_match_elsewhere() {
-    let found = c_pairs(
-        &[
-            ("src/a.c", "#include \"db/x.h\"\n"),
-            ("src/db/x.h", ""),
-            ("db/x.h", ""),
-        ],
-        &[],
-    );
-    assert_eq!(found, ["src/a.c>src/db/x.h"]);
-}
-
-#[test]
-fn an_angle_bracket_include_skips_the_including_files_folder() {
-    // `<x.h>` matches by path ending even when a sibling `x.h` exists; with two files it is Unsure, so no pair.
-    let found = c_pairs(
-        &[
-            ("src/a.c", "#include <x.h>\n"),
-            ("src/x.h", ""),
-            ("lib/x.h", ""),
-        ],
-        &[],
-    );
-    assert_eq!(found, Vec::<String>::new());
-}
-
-#[test]
 fn a_system_name_gives_nothing_for_an_angle_bracket_include_only() {
     for (include, tracked) in [
         ("<string.h>", "util/string.h"),
@@ -401,20 +422,16 @@ fn a_system_name_gives_nothing_for_an_angle_bracket_include_only() {
         let found = c_pairs(&[("src/a.c", &text), (tracked, "")], &[]);
         assert_eq!(found, Vec::<String>::new(), "{include}");
     }
-    // A name not on the list matches, and a quoted include of a listed name does too.
+    // A name not on the list matches, and a quoted include of a listed name does too, elsewhere or next to the file.
     for (include, tracked) in [
         ("<mystring.h>", "util/mystring.h"),
         ("\"string.h\"", "util/string.h"),
+        ("\"string.h\"", "src/string.h"),
     ] {
         let text = format!("#include {include}\n");
         let found = c_pairs(&[("src/a.c", &text), (tracked, "")], &[]);
         assert_eq!(found, [format!("src/a.c>{tracked}")], "{include}");
     }
-    let found = c_pairs(
-        &[("src/a.c", "#include \"string.h\"\n"), ("src/string.h", "")],
-        &[],
-    );
-    assert_eq!(found, ["src/a.c>src/string.h"]);
 }
 
 #[test]
@@ -436,6 +453,24 @@ fn candidates_are_files_whose_path_ends_with_the_include_after_a_slash() {
             vec!["lib/x.h"],
         ),
         ("#include <x.h>\n", vec![("tests/x.h", "")], vec![]),
+        // A tie between a production header and test ones is the production one.
+        (
+            "#include <x.h>\n",
+            vec![("src/x.h", ""), ("tests/x.h", ""), ("fuzz/x.h", "")],
+            vec!["src/x.h"],
+        ),
+        // A sibling wins over a root-relative match elsewhere.
+        (
+            "#include \"db/x.h\"\n",
+            vec![("src/db/x.h", ""), ("db/x.h", "")],
+            vec!["src/db/x.h"],
+        ),
+        // An angle bracket skips the including file's folder: with its sibling and another copy it is Unsure.
+        (
+            "#include <x.h>\n",
+            vec![("src/x.h", ""), ("lib/x.h", "")],
+            vec![],
+        ),
     ] {
         let mut all = vec![("src/a.c", text)];
         all.extend(files);
@@ -490,20 +525,6 @@ fn evidence_does_not_depend_on_file_order() {
             .collect();
         assert_eq!(found, ["m/c.cc>lib/chain.h"], "{prefix}");
     }
-}
-
-#[test]
-fn a_tie_between_a_production_header_and_a_test_one_is_the_production_one() {
-    let found = c_pairs(
-        &[
-            ("src/a.c", "#include <x.h>\n"),
-            ("src/x.h", ""),
-            ("tests/x.h", ""),
-            ("fuzz/x.h", ""),
-        ],
-        &[],
-    );
-    assert_eq!(found, ["src/a.c>src/x.h"]);
 }
 
 #[test]
@@ -568,18 +589,11 @@ fn two_x() -> (tempfile::TempDir, String) {
 #[test]
 fn several_matches_make_the_importer_unsure_and_relax_only_the_candidates_links() {
     let (_dir, root) = two_x();
-    let out = run(&root, "check", &[]);
-    assert_eq!(
-        String::from_utf8_lossy(&out.stderr),
-        "note: app/a.c is unsure of x.h; its links to xa, xb pass as unproven\n"
-    );
-    let problems = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(problems.lines().count(), 1, "{problems}");
-    assert!(
-        problems.starts_with(
-            "import link \"app-other\" runs from \"app\" to \"other\", but the code shows no dependency"
-        ),
-        "{problems}"
+    assert_only_candidate_links_relaxed(
+        &root,
+        "note: app/a.c is unsure of x.h; its links to xa, xb pass as unproven\n",
+        "app",
+        "other",
     );
     let value: Value = serde_json::from_slice(&run(&root, "check", &["--json"]).stdout).unwrap();
     assert_eq!(
