@@ -962,6 +962,69 @@ export const mapScanMerge = (): Fixture =>
     map_scan: mapScanOf(),
     map_scan_edit: mapScanOf({ map: mergedScan, files: { cli: 1, lib: 42 } }),
   });
+// The base scan with the loose tests' folder ignored: no loose tests are left, and tests/ is in the skeleton's `ignored`.
+const testsIgnored = (() => {
+  const map = JSON.parse(mapScanOf().map);
+  map.ignored = ["tests/", "vendor/"];
+  return JSON.stringify(map);
+})();
+/**
+ * Ignore on a loose row (#753): each folder's row offers Ignore beside Add, muted with its reason on src/, whose ignoring would take the parts'
+ * files, so its press sends nothing. Ignore on tests/ sends the held skeleton with the edit; the answer leaves no loose tests and lists tests/
+ * under Ignored folders with Unignore, which takes the focus, and whose press sends the edit back.
+ */
+export const mapScanIgnore = (): Fixture =>
+  mapBaseOf(`
+    const screen = document.querySelector("#map .map-scan");
+    if (!screen) return log("snap:fail no scan screen");
+    const side = screen.querySelector(".map-scan-panel");
+    window.__sent = [];
+    const real = window.fetch;
+    window.fetch = (url, init) => {
+      if (String(url).endsWith("/map_scan_edit")) window.__sent.push(JSON.parse(init.body));
+      return real(url, init);
+    };
+    const hintText = (node) => document.getElementById(node?.getAttribute("interestfor") ?? node?.getAttribute("data-hint") ?? "")?.textContent;
+    const ignoreOf = (folder) => [...side.querySelectorAll(".map-scan-loose button")].find((b) => b.textContent === "Ignore" && b.closest(".map-scan-loose").querySelector(".map-scan-where code").textContent === folder);
+    const src = ignoreOf("src/");
+    if (src?.getAttribute("aria-disabled") !== "true") return log("snap:fail src/'s Ignore is missing or not muted, though src/ holds the parts");
+    if (hintText(src) !== "Ignoring src/ would leave out the files of App, Cli and Lib") log("snap:fail src/'s Ignore says " + JSON.stringify(hintText(src)));
+    src.click();
+    await wait(100);
+    if (window.__sent.length) log("snap:fail a muted Ignore was sent");
+    const tests = ignoreOf("tests/");
+    if (!tests || tests.getAttribute("aria-disabled") === "true") return log("snap:fail tests/'s Ignore is missing or muted");
+    if (tests.type !== "button") log("snap:fail Ignore submits its row's form");
+    if (tests.getAttribute("aria-label") !== "Ignore tests/") log("snap:fail tests/'s Ignore is named " + tests.getAttribute("aria-label"));
+    if (side.querySelector(".map-scan-ignored")) log("snap:fail an ignored folder shows before any Ignore");
+    frame("with Ignore on each loose row");
+    checkColours("with Ignore on each loose row");
+    tests.focus();
+    tests.click();
+    await wait(300);
+    const sent = window.__sent[0];
+    if (sent?.edit?.kind !== "ignore-folder" || sent.edit.folder !== "tests/" || sent.edit.ignored !== true || !sent.map?.includes('"src/lib/"')) log("snap:fail the Ignore sent " + JSON.stringify(sent));
+    if (window.__sent.some((call) => call.edit?.kind === "home")) log("snap:fail Ignore gave the files a part");
+    if (document.querySelector("#map .map-scan-panel") !== side) log("snap:fail the panel was drawn anew, not kept open");
+    const legends = [...side.querySelectorAll(".map-scan-set legend")].map((l) => l.textContent);
+    if (JSON.stringify(legends) !== JSON.stringify(["Copies and vendored code", "Loose files", "Ignored folders"])) log("snap:fail the edits' groups after Ignore: " + JSON.stringify(legends));
+    const ignored = [...side.querySelectorAll(".map-scan-ignored")].map((row) => row.textContent);
+    if (JSON.stringify(ignored) !== JSON.stringify(["tests/Unignore"])) log("snap:fail the ignored rows: " + JSON.stringify(ignored));
+    const undo = side.querySelector(".map-scan-ignored button");
+    if (undo?.getAttribute("aria-label") !== "Unignore tests/") log("snap:fail Unignore is named " + undo?.getAttribute("aria-label"));
+    if (document.activeElement !== undo) log("snap:fail focus is not on Unignore, but on " + document.activeElement?.outerHTML.slice(0, 80));
+    if (!side.querySelector(".map-draft")?.textContent.includes('"tests/"')) log("snap:fail the copy-prompt's skeleton does not ignore tests/");
+    frame("after Ignore");
+    checkColours("after Ignore");
+    undo.click();
+    await wait(300);
+    const back = window.__sent[1];
+    if (back?.edit?.kind !== "ignore-folder" || back.edit.folder !== "tests/" || back.edit.ignored !== false || !back.map?.includes('"tests/"')) log("snap:fail the Unignore sent " + JSON.stringify(back));
+    log("base ok");`, {
+    map_state: mapState({ status: "none", source: null, from: null }),
+    map_scan: mapScanOf(),
+    map_scan_edit: mapScanOf({ map: testsIgnored, loose_tests: [] }),
+  });
 /** Draft the map muted when `claude` is not found (#753, story 12): aria-disabled with its one-line reason, a press starts nothing, and the copy-prompt leads. */
 export const mapScanNoClaude = (): Fixture =>
   mapOpened(`

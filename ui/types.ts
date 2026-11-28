@@ -717,6 +717,7 @@ export type MapScan = {
 /** One change of the skeleton on the scan screen (`Edit` in `server/src/map_scan.rs`, #761); `part: null` gives the files a new part. */
 export type ScanEdit =
   | { kind: "ignore"; folder: string; ignored: boolean }
+  | { kind: "ignore-folder"; folder: string; ignored: boolean }
   | { kind: "home"; files: string[]; part: string | null }
   | { kind: "merge"; part: string; into: string }
   | { kind: "split"; part: string };

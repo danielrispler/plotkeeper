@@ -185,8 +185,11 @@ export function draftTime(parts: number): string {
   return `About ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
 }
 
-/** The loose files or tests of a scan (#761) as the panel offers them: one row a folder, its label and the names of its files. */
-export function looseGroups(files: string[]): { folder: string; label: string; names: string; files: string[] }[] {
+/**
+ * The loose files or tests of a scan (#761) as the panel offers them: one row a folder, its label, the names of its files, and why Ignore is
+ * muted on it, or null: the root, and a folder holding a path of one of `parts`, whose files `ignored` would take (`map_scan.rs` refuses it).
+ */
+export function looseGroups(files: string[], parts: { name: string; paths: string[] }[] = []): { folder: string; label: string; names: string; files: string[]; muted: string | null }[] {
   const byFolder = new Map<string, string[]>();
   for (const file of files) {
     const cut = file.lastIndexOf("/") + 1;
@@ -198,8 +201,17 @@ export function looseGroups(files: string[]): { folder: string; label: string; n
     .map(([folder, group]) => {
       const names = group.map((file) => file.slice(folder.length)).sort();
       const shown = names.length > 4 ? [...names.slice(0, 3), `${names.length - 3} more`] : names;
-      return { folder, label: folder || "The root", names: listed(shown), files: [...group].sort() };
+      const held = parts.filter((part) => part.paths.some((path) => path.startsWith(folder))).map((part) => part.name);
+      const muted = !folder ? "Ignoring the root would leave out the whole repository" : held.length ? `Ignoring ${folder} would leave out the files of ${listed(held)}` : null;
+      return { folder, label: folder || "The root", names: listed(shown), files: [...group].sort(), muted };
     });
+}
+
+/** The folders Ignore left out of a scan's loose rows (#753): the skeleton's `ignored` that are not the copies the scan asks about, sorted. */
+export function ignoredFolders(scan: { map: string; ignore_candidates: { path: string }[] }): string[] {
+  const ignored: unknown = (JSON.parse(scan.map) as { ignored?: unknown }).ignored;
+  const candidates = new Set(scan.ignore_candidates.map((candidate) => candidate.path));
+  return (Array.isArray(ignored) ? ignored : []).filter((path): path is string => typeof path === "string" && !candidates.has(path)).sort();
 }
 
 /** The copy-prompt for the user's own agent (#753, story 13): the skeleton, the file to write and the check to pass, so the agent fills only the words. */

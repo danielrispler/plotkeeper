@@ -35,6 +35,8 @@ pub struct MapScan {
 pub enum Edit {
     /// Ignore `folder` (a reference-copy candidate), or stop ignoring it.
     Ignore { folder: String, ignored: bool },
+    /// Ignore `folder`, a folder of loose files, or stop ignoring it.
+    IgnoreFolder { folder: String, ignored: bool },
     /// Give the loose `files` to the part `part`, or to a new part when it is none.
     Home {
         files: Vec<String>,
@@ -72,6 +74,9 @@ fn edit_of(repo: &Path, map: &str, edit: Edit, claude: bool) -> Result<MapScan, 
                 return Err(format!("{folder} is not a folder the scan asks about"));
             }
             ignore(&mut map, &folder, ignored, &files);
+        }
+        Edit::IgnoreFolder { folder, ignored } => {
+            ignore_folder(&mut map, &folder, ignored, &files)?;
         }
         Edit::Home { files: loose, part } => home(&mut map, &loose, part.as_deref(), &files)?,
         Edit::Merge { part, into } => {
@@ -213,6 +218,33 @@ fn ignore(map: &mut Value, folder: &str, on: bool, files: &[String]) {
             vec![folder.to_string()],
         ));
     }
+}
+
+/// Ignores `folder`, a folder of loose files, or stops ignoring it, its files loose again. A folder that holds a part's files is refused, so
+/// no part loses files to `ignored`, which the check reads before the parts' paths.
+fn ignore_folder(map: &mut Value, folder: &str, on: bool, files: &[String]) -> Result<(), String> {
+    let mut list: Vec<String> = strings(&map["ignored"])
+        .filter(|p| *p != folder)
+        .map(String::from)
+        .collect();
+    if on {
+        let inside: Vec<&String> = files
+            .iter()
+            .filter(|file| file.starts_with(folder))
+            .collect();
+        if !folder.ends_with('/') || inside.iter().all(|file| ignored(map, file)) {
+            return Err(format!("{folder} is not a folder of loose files"));
+        }
+        if let Some(part) = inside.iter().find_map(|file| owner(map, file)) {
+            return Err(format!("{folder} holds files of the part {part}"));
+        }
+        list.push(folder.to_string());
+        list.sort();
+    } else if !strings(&map["ignored"]).any(|p| p == folder) {
+        return Err(format!("{folder} is not ignored"));
+    }
+    map["ignored"] = list.into();
+    Ok(())
 }
 
 /// Gives the loose files `loose` to the part `to`, or to a new part when it is none: their folder whole when they share one that no
@@ -524,10 +556,10 @@ mod tests {
         );
         let first_links = vec![link("app", "lib"), link("snapshot-copy", "lib")];
         let loose = s(&["docs/guide.md", "src/index.ts"]);
-        let cases: Vec<(&str, Option<Edit>, Seen)> = vec![
+        let cases: Vec<(&str, Vec<Edit>, Seen)> = vec![
             (
                 "the scan as it came: a sure candidate ticked, a loose file and a loose test, lib splittable",
-                None,
+                vec![],
                 (
                     vec![app.clone(), lib.clone(), copy.clone()],
                     first_links.clone(),
@@ -539,10 +571,10 @@ mod tests {
             ),
             (
                 "ignoring a candidate drops its part and its line",
-                Some(Edit::Ignore {
+                vec![Edit::Ignore {
                     folder: "src/snapshot-copy/".into(),
                     ignored: true,
-                }),
+                }],
                 (
                     vec![app.clone(), lib.clone()],
                     vec![link("app", "lib")],
@@ -554,10 +586,10 @@ mod tests {
             ),
             (
                 "no longer ignoring a candidate makes it a part, with its lines",
-                Some(Edit::Ignore {
+                vec![Edit::Ignore {
                     folder: "vendor/".into(),
                     ignored: false,
-                }),
+                }],
                 (
                     vec![
                         app.clone(),
@@ -577,11 +609,53 @@ mod tests {
                 ),
             ),
             (
+                "ignoring the folders of a loose file and a loose test leaves them out of the loose lists, and the check",
+                vec![
+                    Edit::IgnoreFolder {
+                        folder: "docs/".into(),
+                        ignored: true,
+                    },
+                    Edit::IgnoreFolder {
+                        folder: "tests/".into(),
+                        ignored: true,
+                    },
+                ],
+                (
+                    vec![app.clone(), lib.clone(), copy.clone()],
+                    first_links.clone(),
+                    s(&["src/index.ts"]),
+                    s(&[]),
+                    s(&["vendor/"]),
+                    lib_splits.clone(),
+                ),
+            ),
+            (
+                "a loose folder ignored, then no longer, is loose again, with no part made of it",
+                vec![
+                    Edit::IgnoreFolder {
+                        folder: "docs/".into(),
+                        ignored: true,
+                    },
+                    Edit::IgnoreFolder {
+                        folder: "docs/".into(),
+                        ignored: false,
+                    },
+                ],
+                (
+                    vec![app.clone(), lib.clone(), copy.clone()],
+                    first_links.clone(),
+                    loose.clone(),
+                    s(&["tests/b.test.ts"]),
+                    s(&["vendor/"]),
+                    lib_splits.clone(),
+                ),
+            ),
+            (
                 "a loose file given to a part joins it by name, since its folder holds other parts",
-                Some(Edit::Home {
+                vec![Edit::Home {
                     files: s(&["src/index.ts"]),
                     part: Some("app".into()),
-                }),
+                }],
                 (
                     vec![
                         part("app", &["src/app/", "src/index.ts"]),
@@ -597,10 +671,10 @@ mod tests {
             ),
             (
                 "a loose file that is not code given a new part makes one of its folder",
-                Some(Edit::Home {
+                vec![Edit::Home {
                     files: s(&["docs/guide.md"]),
                     part: None,
-                }),
+                }],
                 (
                     vec![
                         app.clone(),
@@ -617,10 +691,10 @@ mod tests {
             ),
             (
                 "a loose test given a new part makes one of its folder; a test's imports draw no line",
-                Some(Edit::Home {
+                vec![Edit::Home {
                     files: s(&["tests/b.test.ts"]),
                     part: None,
-                }),
+                }],
                 (
                     vec![
                         app.clone(),
@@ -637,10 +711,10 @@ mod tests {
             ),
             (
                 "a merge leaves one part with both folders, and the line between them goes",
-                Some(Edit::Merge {
+                vec![Edit::Merge {
                     part: "app".into(),
                     into: "lib".into(),
-                }),
+                }],
                 (
                     vec![part("lib", &["src/lib/", "src/app/"]), copy.clone()],
                     vec![link("snapshot-copy", "lib")],
@@ -652,7 +726,7 @@ mod tests {
             ),
             (
                 "a split makes a part of each subfolder of code; the folder's own files stay, and the lines follow",
-                Some(Edit::Split { part: "lib".into() }),
+                vec![Edit::Split { part: "lib".into() }],
                 (
                     vec![
                         app.clone(),
@@ -673,12 +747,25 @@ mod tests {
                 ),
             ),
         ];
-        for (name, edit, want) in cases {
-            let got = match edit {
-                None => scan.clone(),
-                Some(edit) => edit_of(dir.path(), &scan.map, edit, true).unwrap(),
-            };
+        let files = system_map::tracked_files(dir.path()).unwrap();
+        for (name, edits, want) in cases {
+            let mut got = scan.clone();
+            for edit in edits {
+                got = edit_of(dir.path(), &got.map, edit, true).unwrap();
+            }
             assert_eq!(seen(&got), want, "{name}");
+            // The check reads the skeleton as the scan screen does: the files it finds no owner for are the loose ones.
+            let report = system_map::check_text(dir.path(), files.clone(), &got.map);
+            let mut unowned: Vec<String> = report
+                .problems
+                .iter()
+                .filter_map(|problem| problem.split_once(": tracked, but no part owns it"))
+                .map(|(file, _)| file.to_string())
+                .collect();
+            unowned.sort();
+            let mut loose = [got.loose_files.clone(), got.loose_tests.clone()].concat();
+            loose.sort();
+            assert_eq!(unowned, loose, "{name}: the check's unowned files");
         }
     }
 
@@ -687,6 +774,8 @@ mod tests {
         let (dir, _main) = repo();
         write(dir.path(), "src/app/main.ts", "export const a = 1;\n");
         write(dir.path(), "src/lib/b.ts", "export const b = 1;\n");
+        write(dir.path(), "src/index.ts", "export const i = 1;\n");
+        write(dir.path(), "README.md", "# Readme\n");
         git(dir.path(), &["add", "-A"]);
         git(dir.path(), &["commit", "-q", "-m", "Code"]);
         let scan = scan_of(dir.path(), true).unwrap();
@@ -709,6 +798,27 @@ mod tests {
             Edit::Ignore {
                 folder: "src/app/".into(),
                 ignored: true,
+            },
+            // A folder of loose files that holds a part's files too, the root, a file, a folder of nothing, and one not ignored.
+            Edit::IgnoreFolder {
+                folder: "src/".into(),
+                ignored: true,
+            },
+            Edit::IgnoreFolder {
+                folder: String::new(),
+                ignored: true,
+            },
+            Edit::IgnoreFolder {
+                folder: "README.md".into(),
+                ignored: true,
+            },
+            Edit::IgnoreFolder {
+                folder: "nothing/".into(),
+                ignored: true,
+            },
+            Edit::IgnoreFolder {
+                folder: "src/".into(),
+                ignored: false,
             },
         ] {
             let name = format!("{edit:?}");
