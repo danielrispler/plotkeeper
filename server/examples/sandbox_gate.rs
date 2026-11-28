@@ -11,8 +11,10 @@
 //! Each probe but `srt` is a run submitted through [`Runner::submit`], so it carries the command the runner builds. A
 //! probe that tests the OS sandbox makes its escapes from `sh ./probe.sh`, a check the allow list names, so the sandbox
 //! and not the permission layer is what refuses them. Every verdict is read from the disk after the run (a file that
-//! should not exist, a marker that should not show), never from what the agent says. A probe script prints exit codes
-//! only: a read of a denied folder sends its bytes to `/dev/null`, and a file is opened by a shell redirect, `: < file`, which reads none.
+//! should not exist, a marker that should not show), never from what the agent says. A probe script prints
+//! counts only: the `deny-read` probe records how many bytes a read of each denied path returned and how many entries
+//! a listing showed, never the content. macOS refuses such a read and Linux hides the path as empty, so the verdict
+//! reads what came back, not an exit code (#794).
 //!
 //! The evidence folder gets one folder per probe (the run's `run.json`, `stdout`, `stderr`, `status.json`, `setup.log`,
 //! and `verdict.txt`) and `summary.md`. The runs use `--model sonnet`.
@@ -194,39 +196,28 @@ const RUN_IT: &str = "Run exactly this command once with the Bash tool: `sh ./pr
 fn probes(g: &Ground) -> Vec<Probe> {
     let probe = vec!["sh ./probe.sh".to_string()];
     let home = g.home.display();
-    let data = g.data.display();
     let outside = g.outside.display();
     let tmp = tmp_dir();
-    let deny = [
-        ("data_folder_token", format!(": < '{data}/token'")),
-        ("claude_dir", format!("ls '{home}/.claude'")),
-        ("claude_json", format!(": < '{home}/.claude.json'")),
-        ("ssh", format!("ls '{home}/.ssh'")),
-        ("aws", format!("ls '{home}/.aws'")),
-        ("config_gh", format!("ls '{home}/.config/gh'")),
-        ("npmrc", format!(": < '{home}/.npmrc'")),
-        ("netrc", format!(": < '{home}/.netrc'")),
-        (
-            "cargo_credentials",
-            format!(": < '{home}/.cargo/credentials.toml'"),
-        ),
-        ("gnupg", format!("ls '{home}/.gnupg'")),
-        ("kube", format!("ls '{home}/.kube'")),
-        (
-            "control_outside_file",
-            format!(": < '{outside}/secret.txt'"),
-        ),
-    ];
-    let mut reads = String::new();
-    for (name, command) in deny {
-        // `exists` is a stat, so a missing folder is told apart from a refused one.
-        let path = command.split('\'').nth(1).unwrap_or_default();
+    // What each read got, by counts: the bytes of a file, the entries of a folder and the bytes of its `marker`. The
+    // counts go to `reads.txt`, which the verdict reads; no content is printed or copied.
+    let mut reads = String::from(": > reads.txt\n");
+    for e in deny_entries(g) {
+        let path = e.path.display();
+        let name = e.name;
         // Writing to a `String` cannot fail.
-        writeln!(
-            reads,
-            "if [ -e '{path}' ]; then e=yes; else e=no; fi; ( {command} ) >/dev/null 2>&1; echo \"{name} exists=$e exit=$?\""
-        ).ok();
+        if e.dir {
+            writeln!(
+                reads,
+                "n=$(ls -A '{path}' 2>/dev/null | wc -l | tr -d ' '); b=$(cat '{path}/marker' 2>/dev/null | wc -c | tr -d ' '); echo \"{name} bytes=$b entries=$n\" >> reads.txt"
+            ).ok();
+        } else {
+            writeln!(
+                reads,
+                "b=$(cat '{path}' 2>/dev/null | wc -c | tr -d ' '); echo \"{name} bytes=$b entries=0\" >> reads.txt"
+            ).ok();
+        }
     }
+    reads.push_str("cat reads.txt\n");
     vec![
         Probe {
             name: "write",
@@ -264,8 +255,9 @@ fn probes(g: &Ground) -> Vec<Probe> {
         },
         Probe {
             name: "deny-read",
-            criterion: "A read of each `denyRead` folder is refused; denying `~/.claude` and `~/.claude.json` leaves the \
-                        CLI's login working.",
+            criterion: "A read of each `denyRead` path gets no bytes and lists no entries (refused on macOS, hidden as \
+                        empty on Linux); every entry is tested, a missing one through a planted marker; denying \
+                        `~/.claude` and `~/.claude.json` leaves the CLI's login working.",
             kind: Kind::BackLaw,
             variant: Variant::Plain,
             checks: probe.clone(),
@@ -460,6 +452,105 @@ fn clone_repo(g: &Ground, work: &Path) -> Result<(), String> {
         .ok_or("git clone failed".into())
 }
 
+/// A path the `deny-read` probe reads.
+struct Entry {
+    name: &'static str,
+    path: PathBuf,
+    /// A folder, listed and read for its `marker`; otherwise a file, read.
+    dir: bool,
+    /// On the deny list; the one control, a file outside it, must still read.
+    deny: bool,
+}
+
+/// The plotkeeper deny list (`runner.rs`, `denyRead`), as far as the gate's runs reach it, and the control.
+fn deny_entries(g: &Ground) -> Vec<Entry> {
+    let h = &g.home;
+    let e = |name, path: PathBuf, dir, deny| Entry {
+        name,
+        path,
+        dir,
+        deny,
+    };
+    vec![
+        e("data_folder_token", g.data.join("token"), false, true),
+        e("claude_dir", h.join(".claude"), true, true),
+        e("claude_json", h.join(".claude.json"), false, true),
+        e("ssh", h.join(".ssh"), true, true),
+        e("aws", h.join(".aws"), true, true),
+        e("config_gh", h.join(".config/gh"), true, true),
+        e("npmrc", h.join(".npmrc"), false, true),
+        e("netrc", h.join(".netrc"), false, true),
+        e(
+            "cargo_credentials",
+            h.join(".cargo/credentials.toml"),
+            false,
+            true,
+        ),
+        e("gnupg", h.join(".gnupg"), true, true),
+        e("kube", h.join(".kube"), true, true),
+        e(
+            "control_outside_file",
+            g.outside.join("secret.txt"),
+            false,
+            false,
+        ),
+    ]
+}
+
+/// What [`plant`] made, to remove after the run, and which entries it planted.
+struct Planted {
+    made: Vec<PathBuf>,
+    names: Vec<&'static str>,
+}
+
+/// Plants the marker in every deny-list path that is missing, and makes its missing parents. A path that exists, even
+/// a broken link, is left as it is.
+fn plant(g: &Ground) -> Result<Planted, String> {
+    let mut planted = Planted {
+        made: Vec::new(),
+        names: Vec::new(),
+    };
+    for e in deny_entries(g).into_iter().filter(|e| e.deny) {
+        if e.path.symlink_metadata().is_ok() {
+            continue;
+        }
+        let mut missing = Vec::new();
+        let mut at = e.path.parent();
+        while let Some(dir) = at.filter(|d| d.symlink_metadata().is_err()) {
+            missing.push(dir.to_path_buf());
+            at = dir.parent();
+        }
+        for dir in missing.into_iter().rev() {
+            fs::create_dir(&dir).map_err(|err| format!("{}: {err}", dir.display()))?;
+            planted.made.push(dir);
+        }
+        let file = if e.dir {
+            fs::create_dir(&e.path).map_err(|err| format!("{}: {err}", e.path.display()))?;
+            planted.made.push(e.path.clone());
+            e.path.join("marker")
+        } else {
+            e.path.clone()
+        };
+        fs::write(&file, MARKER).map_err(|err| format!("{}: {err}", file.display()))?;
+        planted.made.push(file);
+        planted.names.push(e.name);
+    }
+    Ok(planted)
+}
+
+impl Planted {
+    /// Removes what was planted, newest first. A leftover is only a marker in an empty folder.
+    fn remove(&self) {
+        for p in self.made.iter().rev() {
+            if p.is_dir() {
+                fs::remove_dir(p).ok();
+            } else {
+                fs::remove_file(p).ok();
+            }
+        }
+    }
+}
+
 /// The paths each probe must leave absent, or present, read after its run.
 #[allow(
     clippy::too_many_lines,
@@ -540,6 +631,32 @@ fn verdict(g: &Ground, name: &str, work: &Path, stdout: &str) -> String {
                 if fallback { "shared" } else { "run's own" },
                 tmpdir.display()
             ));
+        }
+        "deny-read" => {
+            let reads = fs::read_to_string(work.join("reads.txt")).unwrap_or_default();
+            // A count that does not parse is not zero: it fails.
+            let count = |line: &str, key: &str| {
+                line.split_whitespace()
+                    .find_map(|w| w.strip_prefix(key))
+                    .and_then(|n| n.parse::<u64>().ok())
+            };
+            for e in deny_entries(g) {
+                let line = reads.lines().find(|l| l.split(' ').next() == Some(e.name));
+                let got = line.and_then(|l| Some((count(l, "bytes=")?, count(l, "entries=")?)));
+                lines.push(match (got, e.deny) {
+                    (None, _) => format!("FAIL {}: no count recorded", e.name),
+                    (Some((b, n)), true) => format!(
+                        "{} {}: a read got {b} bytes and {n} entries",
+                        if b == 0 && n == 0 { "pass" } else { "FAIL" },
+                        e.name
+                    ),
+                    (Some((b, _)), false) => format!(
+                        "{} {} (control, outside the list): a read got {b} bytes",
+                        if b > 0 { "pass" } else { "FAIL" },
+                        e.name
+                    ),
+                });
+            }
         }
         "restricted" => {
             let leaked = stdout.contains(MARKER);
@@ -638,6 +755,15 @@ fn main() -> Result<(), String> {
     }
 
     let wanted = |name: &str| only.is_empty() || only.iter().any(|o| o == name);
+    // A missing deny-list path gets a marker, so every entry is tested; removed after the runs.
+    let planted = if wanted("deny-read") {
+        plant(&g)?
+    } else {
+        Planted {
+            made: Vec::new(),
+            names: Vec::new(),
+        }
+    };
     // `unavailable` wraps `claude` in `/usr/bin/sandbox-exec`, which only macOS has.
     let skip_unavailable = !cfg!(target_os = "macos");
     let probes: Vec<Probe> = probes(&g)
@@ -714,6 +840,7 @@ fn main() -> Result<(), String> {
         rx.recv_timeout(Duration::from_secs(30)).ok();
     }
 
+    planted.remove();
     let mut summary = format!(
         "# Sandbox gate, {}\n\n`claude --version`: {}\n\nGate folder: `{}`\n\n",
         stamp,
@@ -727,6 +854,15 @@ fn main() -> Result<(), String> {
         .trim(),
         g.root.display()
     );
+    if wanted("deny-read") {
+        // Writing to a `String` cannot fail.
+        writeln!(
+            summary,
+            "`deny-read` planted a marker in: {:?}; every other entry existed and was left as it was.\n",
+            planted.names
+        )
+        .ok();
+    }
     for (p, runner, id, work) in &started {
         let outcome = runner.outcome(id).ok_or("no outcome")?;
         let dir = work.parent().ok_or("no run folder")?;
