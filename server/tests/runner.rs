@@ -1005,8 +1005,8 @@ fn a_run_survives_a_restart_and_is_picked_up() {
 /// [`Script`], on a Claude Code the sandbox gate has not passed on.
 struct Ungated;
 
-const UNGATED: &str =
-    "The sandbox gate has not run on Claude Code 2.1.399 (last passed on 2.1.326).";
+/// The warning [`Ungated`] gives: any text, since the runner only carries it.
+const UNGATED: &str = "The sandbox gate has not run on this Claude Code.";
 
 impl Harness for Ungated {
     fn command(&self, plan: &Plan) -> Result<HarnessCommand, String> {

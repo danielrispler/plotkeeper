@@ -1171,7 +1171,8 @@ impl Runner {
     }
 
     /// Queues `request` and starts it when its project has no run going: the run's id. Reads `settings.json` now, so a
-    /// saved change counts from the next run. A run that cannot start is refused with the prompt to copy instead, and its
+    /// saved change counts from the next run, and asks the harness what the run warns of ([`Harness::warning`]: for
+    /// `claude`, a `claude --version` of up to 10 s), before it takes the runner's lock. A run that cannot start is refused with the prompt to copy instead, and its
     /// folder is removed: a harness other than `claude`, a kind with a shell in a project with no `checks`, or a harness
     /// that builds no command.
     pub fn submit(&self, request: Request) -> Result<String, Refusal> {
