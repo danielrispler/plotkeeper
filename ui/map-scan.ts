@@ -8,7 +8,7 @@
 
 import { availability, hint, isUnavailable, patch, pressable, svg, text } from "./dom.js";
 import { fitCamera } from "./map-camera.js";
-import { autoPlace, draftTime, ignoredFolders, languagesLine, linkLines, looseGroups, type MapDoc, parseMap, plateSize, rimPoint, scanPrompt } from "./map-model.js";
+import { autoPlace, draftTime, ignoredFolders, languagesLine, linkLines, looseGroups, type LooseRow, type MapDoc, parseMap, plateSize, rimPoint, scanPrompt } from "./map-model.js";
 import { copyButton } from "./copy-button.js";
 import type { MapScan, MapState, ScanEdit } from "./types.js";
 
@@ -184,6 +184,23 @@ function ignoreBlock(scan: MapScan, acts: ScanActs): HTMLElement | null {
   return set;
 }
 
+// A loose row's Ignore, named for its folder and muted with the row's reason.
+function ignoreButton(kind: "files" | "tests", group: LooseRow, acts: ScanActs): HTMLButtonElement {
+  const ignore = pressable(text("button", "Ignore", "btn small"), null, () => {
+    if (isUnavailable(ignore)) return;
+    panelFocus = { act: "unignore", folder: group.folder };
+    acts.edit({ kind: "ignore-folder", folder: group.folder, ignored: true });
+  });
+  ignore.type = "button";
+  // Each row has an Ignore: its name says which folder.
+  ignore.setAttribute("aria-label", `Ignore ${group.label}`);
+  ignore.dataset.key = `scan ignore-folder ${kind} ${group.folder}`;
+  ignore.dataset.folder = group.folder;
+  ignore.dataset.act = "ignore";
+  availability(ignore, `Leave ${group.folder} out of the map: ${group.parent ? "its folders" : "its files"} need no part`, group.muted);
+  return ignore;
+}
+
 // The loose files or tests, one row a folder, each offered a part or a new part (#753, story 8), or Ignore, muted where it would take a part's files.
 function looseBlock(kind: "files" | "tests", files: string[], doc: Doc, acts: ScanActs): HTMLElement | null {
   const groups = looseGroups(files, doc.parts);
@@ -199,10 +216,19 @@ function looseBlock(kind: "files" | "tests", files: string[], doc: Doc, acts: Sc
     row.dataset.key = `scan loose ${kind} ${group.folder}`;
     // The files go with the form, so a row the panel keeps across a redraw sends what the latest draw listed.
     row.dataset.files = JSON.stringify(group.files);
+    row.style.setProperty("--depth", String(group.depth));
     const where = text("p", "", "map-scan-where");
     const folder = text("code", group.label === "The root" ? group.label : group.folder);
     folder.setAttribute("translate", "no");
     where.append(folder, text("span", ` · ${group.names}`, "map-scan-names"));
+    const ignore = ignoreButton(kind, group, acts);
+    // A parent row (#790) has only Ignore: the rows below it give their files a part.
+    if (group.parent) {
+      row.classList.add("map-scan-parent");
+      row.append(where, ignore);
+      set.append(row);
+      return;
+    }
     const pick = text("select", "", "map-scan-pick");
     pick.id = `map-scan-home-${kind}-${i}`;
     pick.name = "part";
@@ -212,18 +238,6 @@ function looseBlock(kind: "files" | "tests", files: string[], doc: Doc, acts: Sc
     const add = Object.assign(pressable(text("button", "Add", "btn small"), null), { type: "submit" });
     add.dataset.key = `scan add ${kind} ${group.folder}`;
     hint(add, kind === "files" ? "Give these files to the part chosen, or to a new part" : "Give these tests to the part chosen, or to a new part");
-    const ignore = pressable(text("button", "Ignore", "btn small"), null, () => {
-      if (isUnavailable(ignore)) return;
-      panelFocus = { act: "unignore", folder: group.folder };
-      acts.edit({ kind: "ignore-folder", folder: group.folder, ignored: true });
-    });
-    ignore.type = "button";
-    // Each row has an Ignore: its name says which folder.
-    ignore.setAttribute("aria-label", `Ignore ${group.label}`);
-    ignore.dataset.key = `scan ignore-folder ${kind} ${group.folder}`;
-    ignore.dataset.folder = group.folder;
-    ignore.dataset.act = "ignore";
-    availability(ignore, `Leave ${group.folder} out of the map: its files need no part`, group.muted);
     row.append(where, label, pick, add, ignore);
     row.addEventListener("submit", (event) => {
       event.preventDefault();

@@ -1025,6 +1025,67 @@ export const mapScanIgnore = (): Fixture =>
     map_scan: mapScanOf(),
     map_scan_edit: mapScanOf({ map: testsIgnored, loose_tests: [] }),
   });
+// The loose files of two parent rows (#790): .claude/skills/ over its two folders, and src/, over two folders beside the parts' own.
+const parentFiles = [".claude/skills/a/s.md", ".claude/skills/b/s.md", "src/x/x.ts", "src/y/y.ts"];
+const parentIgnored = (() => {
+  const map = JSON.parse(mapScanOf().map);
+  map.ignored = [".claude/skills/", "vendor/"];
+  return JSON.stringify(map);
+})();
+/**
+ * A loose folder holding only folders gets one Ignore (#790): `.claude/skills/` shows a parent row above its two folders' rows, indented, with
+ * Ignore alone and no Give to or Add, and `src/` shows one muted, since the parts hold files there. The muted press sends nothing; the parent's
+ * sends `ignore-folder` for `.claude/skills/`, the answer leaves only the `src/` rows, lists the folder under Ignored folders and puts the
+ * focus on its Unignore, whose press sends the edit back.
+ */
+export const mapScanParent = (): Fixture =>
+  mapBaseOf(`
+    const screen = document.querySelector("#map .map-scan");
+    if (!screen) return log("snap:fail no scan screen");
+    const side = screen.querySelector(".map-scan-panel");
+    window.__sent = [];
+    const real = window.fetch;
+    window.fetch = (url, init) => {
+      if (String(url).endsWith("/map_scan_edit")) window.__sent.push(JSON.parse(init.body));
+      return real(url, init);
+    };
+    const hintText = (node) => document.getElementById(node?.getAttribute("interestfor") ?? node?.getAttribute("data-hint") ?? "")?.textContent;
+    const rowOf = (folder) => [...side.querySelectorAll(".map-scan-loose")].find((r) => r.querySelector(".map-scan-where code").textContent === folder);
+    const folders = [...side.querySelectorAll(".map-scan-loose .map-scan-where code")].map((c) => c.textContent);
+    if (JSON.stringify(folders) !== JSON.stringify([".claude/skills/", ".claude/skills/a/", ".claude/skills/b/", "src/", "src/x/", "src/y/"])) return log("snap:fail the loose rows: " + JSON.stringify(folders));
+    const parent = rowOf(".claude/skills/");
+    if (!parent?.classList.contains("map-scan-parent") || parent.querySelector("select, .map-scan-pick") || [...parent.querySelectorAll("button")].map((b) => b.textContent).join() !== "Ignore") log("snap:fail the parent row is not an Ignore alone");
+    if (!parent.querySelector(".map-scan-names")?.textContent.includes("2 folders")) log("snap:fail the parent says " + parent.textContent);
+    if (rowOf(".claude/skills/a/").querySelector(".map-scan-parent") || !rowOf(".claude/skills/a/").querySelector("select")) log("snap:fail a folder's row lost its Give to");
+    if (parseFloat(getComputedStyle(rowOf(".claude/skills/a/")).marginInlineStart) <= parseFloat(getComputedStyle(parent).marginInlineStart)) log("snap:fail the folders are not indented under their parent");
+    const held = rowOf("src/").querySelector("button");
+    if (held?.getAttribute("aria-disabled") !== "true" || hintText(held) !== "Ignoring src/ would leave out the files of App, Cli and Lib") log("snap:fail src/'s Ignore: " + JSON.stringify(hintText(held)));
+    held.click();
+    await wait(100);
+    if (window.__sent.length) log("snap:fail a muted Ignore was sent");
+    frame("with a parent row");
+    checkColours("with a parent row");
+    const ignore = parent.querySelector("button");
+    if (ignore.getAttribute("aria-label") !== "Ignore .claude/skills/") log("snap:fail the parent's Ignore is named " + ignore.getAttribute("aria-label"));
+    ignore.focus();
+    ignore.click();
+    await wait(300);
+    const sent = window.__sent[0];
+    if (sent?.edit?.kind !== "ignore-folder" || sent.edit.folder !== ".claude/skills/" || sent.edit.ignored !== true) log("snap:fail the Ignore sent " + JSON.stringify(sent));
+    if (JSON.stringify([...side.querySelectorAll(".map-scan-loose .map-scan-where code")].map((c) => c.textContent)) !== JSON.stringify(["src/", "src/x/", "src/y/"])) log("snap:fail the rows after Ignore");
+    const undo = side.querySelector(".map-scan-ignored button");
+    if (undo?.getAttribute("aria-label") !== "Unignore .claude/skills/") log("snap:fail Unignore is named " + undo?.getAttribute("aria-label"));
+    if (document.activeElement !== undo) log("snap:fail focus is not on Unignore, but on " + document.activeElement?.outerHTML.slice(0, 80));
+    frame("after the parent's Ignore");
+    undo.click();
+    await wait(300);
+    const back = window.__sent[1];
+    if (back?.edit?.kind !== "ignore-folder" || back.edit.folder !== ".claude/skills/" || back.edit.ignored !== false) log("snap:fail the Unignore sent " + JSON.stringify(back));
+    log("base ok");`, {
+    map_state: mapState({ status: "none", source: null, from: null }),
+    map_scan: mapScanOf({ loose_files: parentFiles, loose_tests: [] }),
+    map_scan_edit: mapScanOf({ map: parentIgnored, loose_files: parentFiles.slice(2), loose_tests: [] }),
+  });
 /** Draft the map muted when `claude` is not found (#753, story 12): aria-disabled with its one-line reason, a press starts nothing, and the copy-prompt leads. */
 export const mapScanNoClaude = (): Fixture =>
   mapOpened(`
