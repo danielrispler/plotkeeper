@@ -70,12 +70,17 @@ fn a_quoted_include_pairs_with_a_file_next_to_the_including_file() {
             "#include \"x.h\"\n#include \"../top.h\"\n",
             from_main(&["src/x.h", "top.h"]),
         ),
-        // Not next to the file, and no later step yet: angle brackets, a root-relative path, a missing file.
-        ("#include <x.h>\n", vec![]),
-        ("#include \"src/x.h\"\n", vec![]),
+        // Not next to the file: the path-ending match settles an angle bracket and a root-relative path.
+        ("#include <x.h>\n", from_main(&["src/x.h"])),
+        ("#include \"src/x.h\"\n", from_main(&["src/x.h"])),
+        ("#include <src/x.h>\n", from_main(&["src/x.h"])),
+        // A path naming no tracked file, and a climb above the root.
         ("#include \"gone.h\"\n", vec![]),
-        // A climb above the root.
         ("#include \"../../top.h\"\n", vec![]),
+        // A `..` path that does not resolve next to the file never reaches the path-ending match.
+        ("#include \"../x.h\"\n", vec![]),
+        ("#include <../x.h>\n", vec![]),
+        ("#include \"sub/../../x.h\"\n", vec![]),
     ] {
         assert_eq!(pairs_of(text), expected, "{text}");
     }
@@ -330,4 +335,261 @@ fn commit_mode_gives_the_pairs_of_the_working_tree() {
         sites(&root, &["--commit", "HEAD"]),
         ["a/a.c>b/b.h a/a.c:1", "b/b.h>a/a.h b/b.h:1"]
     );
+}
+
+/// The files that make `n` unique includes of `<{tag}{i}.h>`, each header in `folder` and each included from a source
+/// of its own.
+fn evidence(folder: &str, tag: &str, n: usize) -> Vec<(String, String)> {
+    (0..n)
+        .flat_map(|i| {
+            [
+                (format!("m/{tag}e{i}.c"), format!("#include <{tag}{i}.h>\n")),
+                (format!("{folder}{tag}{i}.h"), String::new()),
+            ]
+        })
+        .collect()
+}
+
+fn owned(files: &[(String, String)]) -> Vec<(&str, &str)> {
+    files
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect()
+}
+
+#[test]
+fn a_sibling_wins_over_a_root_relative_match_elsewhere() {
+    let found = c_pairs(
+        &[
+            ("src/a.c", "#include \"db/x.h\"\n"),
+            ("src/db/x.h", ""),
+            ("db/x.h", ""),
+        ],
+        &[],
+    );
+    assert_eq!(found, ["src/a.c>src/db/x.h"]);
+}
+
+#[test]
+fn an_angle_bracket_include_skips_the_including_files_folder() {
+    // `<x.h>` matches by path ending even when a sibling `x.h` exists; with two files it is Unsure, so no pair.
+    let found = c_pairs(
+        &[
+            ("src/a.c", "#include <x.h>\n"),
+            ("src/x.h", ""),
+            ("lib/x.h", ""),
+        ],
+        &[],
+    );
+    assert_eq!(found, Vec::<String>::new());
+}
+
+#[test]
+fn a_system_name_gives_nothing_for_an_angle_bracket_include_only() {
+    for (include, tracked) in [
+        ("<string.h>", "util/string.h"),
+        ("<sys/time.h>", "compat/sys/time.h"),
+        ("<windows.h>", "win/windows.h"),
+        ("<cpuid.h>", "compat/cpuid.h"),
+        ("<vector>", "util/vector"),
+        ("<linux/x.h>", "compat/linux/x.h"),
+        ("<arpa/inet.h>", "compat/arpa/inet.h"),
+        ("<memory.h>", "util/memory.h"),
+        ("<direct.h>", "util/direct.h"),
+    ] {
+        let text = format!("#include {include}\n");
+        let found = c_pairs(&[("src/a.c", &text), (tracked, "")], &[]);
+        assert_eq!(found, Vec::<String>::new(), "{include}");
+    }
+    // A name not on the list matches, and a quoted include of a listed name does too.
+    for (include, tracked) in [
+        ("<mystring.h>", "util/mystring.h"),
+        ("\"string.h\"", "util/string.h"),
+    ] {
+        let text = format!("#include {include}\n");
+        let found = c_pairs(&[("src/a.c", &text), (tracked, "")], &[]);
+        assert_eq!(found, [format!("src/a.c>{tracked}")], "{include}");
+    }
+    let found = c_pairs(
+        &[("src/a.c", "#include \"string.h\"\n"), ("src/string.h", "")],
+        &[],
+    );
+    assert_eq!(found, ["src/a.c>src/string.h"]);
+}
+
+#[test]
+fn candidates_are_files_whose_path_ends_with_the_include_after_a_slash() {
+    for (text, files, expected) in [
+        // The path ends the candidate's path only at a folder boundary.
+        ("#include <x.h>\n", vec![("lib/ax.h", "")], vec![]),
+        ("#include <b/x.h>\n", vec![("lib/ab/x.h", "")], vec![]),
+        (
+            "#include <b/x.h>\n",
+            vec![("lib/a/b/x.h", "")],
+            vec!["lib/a/b/x.h"],
+        ),
+        ("#include <x.h>\n", vec![("x.h", "")], vec!["x.h"]),
+        // A skipped file is not a candidate, so the other file is the only one.
+        (
+            "#include <x.h>\n",
+            vec![("lib/x.h", ""), ("tests/x.h", "")],
+            vec!["lib/x.h"],
+        ),
+        ("#include <x.h>\n", vec![("tests/x.h", "")], vec![]),
+    ] {
+        let mut all = vec![("src/a.c", text)];
+        all.extend(files);
+        let found = c_pairs(&all, &[]);
+        let expected: Vec<String> = expected.iter().map(|t| format!("src/a.c>{t}")).collect();
+        assert_eq!(found, expected, "{text} {all:?}");
+    }
+}
+
+#[test]
+fn a_tie_is_settled_by_the_folder_five_unique_matches_use() {
+    for (name, ev, extra, expected) in [
+        ("five settle it", 5, 0, Some("src/chain.h")),
+        ("four do not", 4, 0, None),
+        ("two folders with five each stay unsure", 5, 5, None),
+    ] {
+        let mut files = evidence("src/", "a", ev);
+        files.extend(evidence("src/kernel/", "b", extra));
+        files.push(("src/chain.h".into(), String::new()));
+        files.push(("src/kernel/chain.h".into(), String::new()));
+        files.push(("src/kernel/c.cc".into(), "#include <chain.h>\n".into()));
+        let found: Vec<String> = c_pairs(&owned(&files), &[])
+            .into_iter()
+            .filter(|p| p.starts_with("src/kernel/c.cc"))
+            .collect();
+        let expected: Vec<String> = expected
+            .iter()
+            .map(|t| format!("src/kernel/c.cc>{t}"))
+            .collect();
+        assert_eq!(found, expected, "{name}");
+    }
+}
+
+#[test]
+fn evidence_does_not_depend_on_file_order() {
+    // The includes that are the evidence sort after the tie's file, and before it.
+    for prefix in ["a", "z"] {
+        let mut files: Vec<(String, String)> = (0..5)
+            .flat_map(|i| {
+                [
+                    (format!("{prefix}/e{i}.c"), format!("#include <u{i}.h>\n")),
+                    (format!("lib/u{i}.h"), String::new()),
+                ]
+            })
+            .collect();
+        files.push(("lib/chain.h".into(), String::new()));
+        files.push(("lib/kernel/chain.h".into(), String::new()));
+        files.push(("m/c.cc".into(), "#include <chain.h>\n".into()));
+        let found: Vec<String> = c_pairs(&owned(&files), &[])
+            .into_iter()
+            .filter(|p| p.starts_with("m/c.cc"))
+            .collect();
+        assert_eq!(found, ["m/c.cc>lib/chain.h"], "{prefix}");
+    }
+}
+
+#[test]
+fn a_tie_between_a_production_header_and_a_test_one_is_the_production_one() {
+    let found = c_pairs(
+        &[
+            ("src/a.c", "#include <x.h>\n"),
+            ("src/x.h", ""),
+            ("tests/x.h", ""),
+            ("fuzz/x.h", ""),
+        ],
+        &[],
+    );
+    assert_eq!(found, ["src/a.c>src/x.h"]);
+}
+
+#[test]
+fn an_ignored_copy_keeps_the_include_unsure_even_with_evidence_for_the_live_one() {
+    let mut files = evidence("src/", "a", 5);
+    files.push(("src/sds.h".into(), String::new()));
+    files.push(("deps/hiredis/sds.h".into(), String::new()));
+    files.push(("src/cli.c".into(), "#include <sds.h>\n".into()));
+    let files = owned(&files);
+    let found = c_pairs(&files, &["deps/"]);
+    assert!(
+        !found.iter().any(|p| p.starts_with("src/cli.c")),
+        "{found:?}"
+    );
+    let (_dir, root) = repo(&per_file(&files, &["deps/"]), &files);
+    let value: Value = serde_json::from_slice(&run(&root, "check", &["--json"]).stdout).unwrap();
+    assert_eq!(
+        value["unsure"],
+        json!([{
+            "file": "src/cli.c",
+            "name": "sds.h",
+            "reason": "an ignored copy matches it",
+            "candidates": ["src/sds.h"]
+        }])
+    );
+}
+
+#[test]
+fn an_include_matching_only_an_ignored_file_gives_nothing_and_no_unsure() {
+    let files = [("src/a.c", "#include <sds.h>\n"), ("deps/sds.h", "")];
+    assert_eq!(c_pairs(&files, &["deps/"]), Vec::<String>::new());
+    let (_dir, root) = repo(&per_file(&files, &["deps/"]), &files);
+    let value: Value = serde_json::from_slice(&run(&root, "check", &["--json"]).stdout).unwrap();
+    assert!(value["unsure"].is_null(), "{value}");
+}
+
+/// A repository where `app` includes `<x.h>`, which two other parts hold, and a third part `other` holds a file `app`
+/// also links to.
+fn two_x() -> (tempfile::TempDir, String) {
+    let files = [
+        ("app/a.c", "#include <x.h>\n"),
+        ("xa/x.h", ""),
+        ("xb/x.h", ""),
+        ("other/o.h", ""),
+    ];
+    repo(
+        &extractor_map(
+            "c-includes",
+            &[
+                ("app", &["app/"]),
+                ("xa", &["xa/"]),
+                ("xb", &["xb/"]),
+                ("other", &["other/"]),
+            ],
+            &[("app", "xa"), ("app", "xb"), ("app", "other")],
+            &[],
+        ),
+        &files,
+    )
+}
+
+#[test]
+fn several_matches_make_the_importer_unsure_and_relax_only_the_candidates_links() {
+    let (_dir, root) = two_x();
+    let out = run(&root, "check", &[]);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "note: app/a.c is unsure of x.h; its links to xa, xb pass as unproven\n"
+    );
+    let problems = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(problems.lines().count(), 1, "{problems}");
+    assert!(
+        problems.starts_with(
+            "import link \"app-other\" runs from \"app\" to \"other\", but the code shows no dependency"
+        ),
+        "{problems}"
+    );
+    let value: Value = serde_json::from_slice(&run(&root, "check", &["--json"]).stdout).unwrap();
+    assert_eq!(
+        value["unsure"],
+        json!([{
+            "file": "app/a.c",
+            "name": "x.h",
+            "reason": "several files match it",
+            "candidates": ["xa/x.h", "xb/x.h"]
+        }])
+    );
+    assert_eq!(value["edges"], json!([]));
 }

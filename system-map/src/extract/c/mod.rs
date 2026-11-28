@@ -1,13 +1,17 @@
 //! The `c-includes` extractor: the `#include` directives of C and C++ files, read as text with no compiler, `cmake` or
-//! `make` run (ADR 0002), each resolved to a tracked file and paired with it (spec #806). This first slice resolves a
-//! quoted include of a file next to the including file; the later steps (spec #806, "Resolution, per include") go beside
-//! it.
+//! `make` run (ADR 0002), each resolved to a tracked file and paired with it, or left Unsure (spec #806, "Resolution,
+//! per include"; ADR 0004).
 
 mod lexer;
+mod resolve;
+mod system_headers;
 
-use super::{Extractor, Output, Pair, Repo, folders};
+use std::collections::BTreeMap;
 
-use lexer::{Include, includes};
+use super::{Extractor, Output, Pair, Repo, Unsure, folders};
+
+use lexer::includes;
+use resolve::Settled;
 
 pub(crate) struct CIncludes;
 
@@ -32,7 +36,11 @@ impl Extractor for CIncludes {
     }
 
     fn extract(&self, repo: &Repo) -> Output {
-        let mut pairs = Vec::new();
+        // Every include is settled as far as the path-ending match first, so that the folder evidence is counted over
+        // the whole repository before any tie is settled.
+        let index = resolve::Index::new(repo);
+        let mut evidence = BTreeMap::new();
+        let mut settled = Vec::new();
         for &file in repo.files() {
             if repo.is_ignored(file) || !self.reads(file) || is_test_file(file) {
                 continue;
@@ -41,15 +49,38 @@ impl Extractor for CIncludes {
                 continue;
             };
             for include in includes(&text) {
-                if let Some(to) = resolve(repo, file, &include) {
-                    pairs.push(Pair::at(file, &to, include.line));
-                }
+                let Some(path) = resolve::clean(&include.path) else {
+                    continue;
+                };
+                let found = resolve::settle(repo, &index, file, &include, &path, &mut evidence);
+                settled.push((file, include, path, found));
             }
         }
-        Output {
-            pairs,
-            ..Output::default()
+        let mut output = Output::default();
+        for (file, include, path, found) in settled {
+            let (reason, candidates) = match found {
+                Settled::Nothing => continue,
+                Settled::File(to) => {
+                    output.pairs.push(Pair::at(file, &to, include.line));
+                    continue;
+                }
+                Settled::Tie(candidates) => {
+                    if let Some(to) = resolve::tie_break(&candidates, &path, &evidence) {
+                        output.pairs.push(Pair::at(file, &to, include.line));
+                        continue;
+                    }
+                    ("several files match it", candidates)
+                }
+                Settled::IgnoredCopy(candidates) => ("an ignored copy matches it", candidates),
+            };
+            output.unsure.push(Unsure {
+                file: file.to_string(),
+                name: include.path,
+                reason: reason.to_string(),
+                candidates: candidates.iter().map(ToString::to_string).collect(),
+            });
         }
+        output
     }
 
     #[cfg(test)]
@@ -81,43 +112,4 @@ fn is_test_file(file: &str) -> bool {
         || name
             .strip_prefix("test_")
             .is_some_and(|rest| rest.contains('.'))
-}
-
-/// The include's path as written, less its `.` segments; none for an empty path, an absolute one or one with a
-/// backslash (spec #806, "Paths").
-fn clean(path: &str) -> Option<String> {
-    if path.starts_with('/') || path.contains('\\') {
-        return None;
-    }
-    let kept: Vec<&str> = path.split('/').filter(|s| *s != ".").collect();
-    let cleaned = kept.join("/");
-    (!cleaned.is_empty()).then_some(cleaned)
-}
-
-/// The tracked file `include`, in `from`, names, when it is a file a pair may end in.
-fn resolve(repo: &Repo, from: &str, include: &Include) -> Option<String> {
-    let path = clean(&include.path)?;
-    if let Some(answer) = next_to_the_file(repo, from, include, &path) {
-        return answer;
-    }
-    // The later steps (system names, the path-ending match, the folder tie-break) go here, in modules beside this one.
-    None
-}
-
-/// Step 1 (spec #806, "Resolution, per include"): a quoted include of a tracked file next to the including file is that
-/// file, as the compiler's first search step has it. The outer none means no such file, so the search goes on; the inner
-/// one means the file is ignored or skipped, so the search stops with no pair.
-fn next_to_the_file(
-    repo: &Repo,
-    from: &str,
-    include: &Include,
-    path: &str,
-) -> Option<Option<String>> {
-    if !include.quoted {
-        return None;
-    }
-    let near = folders::join(folders::folder_of(from), path)?;
-    repo.files()
-        .contains(near.as_str())
-        .then(|| (!repo.is_ignored(&near) && !is_test_file(&near)).then_some(near))
 }
