@@ -237,7 +237,7 @@ fn probes(g: &Ground) -> Vec<Probe> {
             setup: None,
             script: sh(&format!(
                 "touch '{home}/.pk-gate-home'; echo home=$?\n\
-                 touch {tmp}/pk-gate-tmp; echo private_tmp=$?\n\
+                 touch '{tmp}/pk-gate-tmp'; echo private_tmp=$?\n\
                  touch ../pk-gate-run-folder; echo run_folder=$?\n\
                  touch '{outside}/pk-gate-outside'; echo outside=$?\n\
                  touch inside.txt; echo inside=$?\n"
@@ -600,7 +600,7 @@ fn main() -> Result<(), String> {
     let only: Vec<String> = args.collect();
     let home = std::env::home_dir().ok_or("no home folder")?;
     let stamp = studio_understanding::millis();
-    // Beside the real runs folder, so a run's clone sits where a real one does.
+    // Under the platform's cache folder, as the real runs folder is.
     let cache = if cfg!(target_os = "macos") {
         "Library/Caches"
     } else {
@@ -639,7 +639,7 @@ fn main() -> Result<(), String> {
 
     let wanted = |name: &str| only.is_empty() || only.iter().any(|o| o == name);
     // `unavailable` wraps `claude` in `/usr/bin/sandbox-exec`, which only macOS has.
-    let skip_unavailable = cfg!(target_os = "linux");
+    let skip_unavailable = !cfg!(target_os = "macos");
     let probes: Vec<Probe> = probes(&g)
         .into_iter()
         .filter(|p| {
